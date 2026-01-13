@@ -7,8 +7,8 @@ on:
 
 jobs:
   build-and-release:
-    name: Build, package and create release
-    runs-on: ubuntu-latest
+    name: Build, package and create release (Windows)
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -41,11 +41,15 @@ jobs:
       - name: Package application
         run: pnpm package
 
-      - name: Create GitHub release (draft)
-        uses: ncipollo/release-action@v1
+      - name: Make (create installers)
+        run: pnpm make
+
+      - name: Create Release and upload assets
+        uses: softprops/action-gh-release@v1
         with:
-          tag: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
+          files: out/make/**
           body: "Automated release created by workflow"
           draft: true
         env:
