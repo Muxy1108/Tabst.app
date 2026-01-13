@@ -41,6 +41,10 @@ jobs:
       - name: Package application
         run: pnpm package
 
+      - name: Install 7-Zip (needed by Squirrel)
+        shell: powershell
+        run: choco install 7zip -y
+
       - name: Make (create installers)
         run: pnpm make
 
