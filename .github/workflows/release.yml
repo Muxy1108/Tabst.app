@@ -48,13 +48,13 @@ jobs:
       - name: Make (create installers)
         run: pnpm make
 
-      - name: Create Release and upload assets
+      - name: Create Release and upload ZIP portable assets only
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          files: out/make/**
-          body: "Automated release created by workflow"
+          files: out/make/**/*.zip
+          body: "Automated release created by workflow (portable ZIP only)"
           draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -7,10 +7,11 @@ module.exports = {
 	},
 	rebuildConfig: {},
 	makers: [
-		{
-			name: "@electron-forge/maker-squirrel",
-			config: {},
-		},
+		// Squirrel maker temporarily disabled: CI will build portable ZIP only for now
+		// {
+		// 	name: "@electron-forge/maker-squirrel",
+		// 	config: {},
+		// },
 		{
 			name: "@electron-forge/maker-zip",
 			// no platforms specified: zip maker will be available for all supported platforms
