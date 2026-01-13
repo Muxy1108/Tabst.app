@@ -1,0 +1,795 @@
+{
+	"commands": [
+		{
+			"name": "title",
+			"label": "\\title",
+			"detail": "Set song title",
+			"documentation": "Sets the title text for the score. Commonly shown in the score header.",
+			"insertText": "\\title ${1:My Song Title}"
+		},
+		{
+			"name": "subtitle",
+			"label": "\\subtitle",
+			"detail": "Set subtitle",
+			"documentation": "Sets a subtitle or secondary title for the score.",
+			"insertText": "\\subtitle ${1:Subtitle}"
+		},
+		{
+			"name": "artist",
+			"label": "\\artist",
+			"detail": "Set artist or performer",
+			"documentation": "Sets the artist/performer associated with the score.",
+			"insertText": "\\artist ${1:Artist Name}"
+		},
+		{
+			"name": "album",
+			"label": "\\album",
+			"detail": "Set album",
+			"documentation": "Sets album information for the score.",
+			"insertText": "\\album ${1:Album Name}"
+		},
+		{
+			"name": "composer",
+			"label": "\\composer",
+			"detail": "Set composer",
+			"documentation": "Sets composer information for the score.",
+			"insertText": "\\composer ${1:Composer Name}"
+		},
+		{
+			"name": "arranger",
+			"label": "\\arranger",
+			"detail": "Set arranger",
+			"documentation": "Sets arranger information.",
+			"insertText": "\\arranger ${1:Arranger}"
+		},
+		{
+			"name": "date",
+			"label": "\\date",
+			"detail": "Set date",
+			"documentation": "Sets the date string for the score.",
+			"insertText": "\\date ${1:YYYY-MM-DD}"
+		},
+		{
+			"name": "copyright",
+			"label": "\\copyright",
+			"detail": "Set copyright",
+			"documentation": "Sets a copyright notice for the score.",
+			"insertText": "\\copyright ${1:© Owner}"
+		},
+		{
+			"name": "tempo",
+			"label": "\\tempo",
+			"detail": "Set tempo (BPM)",
+			"documentation": "Sets the playback tempo in beats-per-minute (BPM).",
+			"insertText": "\\tempo ${1:120}"
+		},
+		{
+			"name": "time",
+			"label": "\\time",
+			"detail": "Set time signature",
+			"documentation": "Sets the time signature for the piece (e.g., 4/4, 3/4).",
+			"insertText": "\\time ${1:4/4}"
+		},
+		{
+			"name": "meter",
+			"label": "\\meter",
+			"detail": "Set meter",
+			"documentation": "Sets meter information for the score. Often used alongside time signature.",
+			"insertText": "\\meter ${1:4/4}"
+		},
+		{
+			"name": "key",
+			"label": "\\key",
+			"detail": "Set key signature",
+			"documentation": "Sets the key signature (e.g., C, G, D minor).",
+			"insertText": "\\key ${1:C}"
+		},
+		{
+			"name": "clef",
+			"label": "\\clef",
+			"detail": "Set clef",
+			"documentation": "Sets which clef to use (e.g., treble, bass, alto).",
+			"insertText": "\\clef ${1:treble}"
+		},
+		{
+			"name": "capo",
+			"label": "\\capo",
+			"detail": "Set capo (guitar)",
+			"documentation": "Indicates the capo fret position for guitar or similar instruments.",
+			"insertText": "\\capo ${1:3}"
+		},
+		{
+			"name": "transpose",
+			"label": "\\transpose",
+			"detail": "Transpose by semitones",
+			"documentation": "Transpose the playback or notation by a number of semitones.",
+			"insertText": "\\transpose ${1:2}"
+		},
+		{
+			"name": "ts",
+			"label": "\\ts",
+			"detail": "Shorthand/time syntax",
+			"documentation": "Shorthand for some time/tempo related transformations or a short-time signature command.",
+			"insertText": "\\ts ${1:4/4}"
+		},
+		{
+			"name": "track",
+			"label": "\\track",
+			"detail": "Choose track",
+			"documentation": "Selects or creates a track (instrument/voice).",
+			"insertText": "\\track ${1:1}"
+		},
+		{
+			"name": "instrument",
+			"label": "\\instrument",
+			"detail": "Instrument change",
+			"documentation": "Sets the instrument for the current track/voice.",
+			"insertText": "\\instrument ${1:Guitar}"
+		},
+		{
+			"name": "program",
+			"label": "\\program",
+			"detail": "Program / sound font index",
+			"documentation": "Sets the MIDI program/bank or soundfont to use for a track.",
+			"insertText": "\\program ${1:24}"
+		},
+		{
+			"name": "channel",
+			"label": "\\channel",
+			"detail": "MIDI channel",
+			"documentation": "Sets the MIDI channel for the track.",
+			"insertText": "\\channel ${1:1}"
+		},
+		{
+			"name": "lyrics",
+			"label": "\\lyrics",
+			"detail": "Add lyrics",
+			"documentation": "Inserts lyric lines or lyrics for notes.",
+			"insertText": "\\lyrics ${1:La la la}"
+		},
+		{
+			"name": "lyric",
+			"label": "\\lyric",
+			"detail": "Add a single lyric",
+			"documentation": "Add lyric associated with a particular note.",
+			"insertText": "\\lyric ${1:Text}"
+		},
+		{
+			"name": "repeat",
+			"label": "\\repeat",
+			"detail": "Start repeat block",
+			"documentation": "Start a repeat block for measures. Use `\\endrepeat` to close",
+			"insertText": "\\repeat ${1:count}"
+		},
+		{
+			"name": "endrepeat",
+			"label": "\\endrepeat",
+			"detail": "End repeat block",
+			"documentation": "Ends a `\\repeat` block.",
+			"insertText": "\\endrepeat"
+		},
+		{
+			"name": "measure",
+			"label": "\\measure",
+			"detail": "Insert measure metadata",
+			"documentation": "Insert measure-specific metadata or attributes.",
+			"insertText": "\\measure ${1:attrs}"
+		},
+		{
+			"name": "bar",
+			"label": "\\bar",
+			"detail": "Barline",
+			"documentation": "Adds a barline or barline style marker.",
+			"insertText": "\\bar ${1:type}"
+		},
+		{
+			"name": "note",
+			"label": "\\note",
+			"detail": "Insert a note",
+			"documentation": "Insert a single note or a note modifier depending on context.",
+			"insertText": "\\note ${1:C4}"
+		},
+		{
+			"name": "chord",
+			"label": "\\chord",
+			"detail": "Insert a chord",
+			"documentation": "Insert chord name or power chord information for a given beat.",
+			"insertText": "\\chord ${1:Cmaj7}"
+		},
+		{
+			"name": "volume",
+			"label": "\\volume",
+			"detail": "Volume / gain",
+			"documentation": "Set playback volume for this track or note.",
+			"insertText": "\\volume ${1:0.75}"
+		},
+		{
+			"name": "pan",
+			"label": "\\pan",
+			"detail": "Pan (stereo)",
+			"documentation": "Set left-right stereo pan position.",
+			"insertText": "\\pan ${1:0.5}"
+		},
+		{
+			"name": "mute",
+			"label": "\\mute",
+			"detail": "Mute track",
+			"documentation": "Mute the current track.",
+			"insertText": "\\mute ${1:true}"
+		},
+		{
+			"name": "solo",
+			"label": "\\solo",
+			"detail": "Solo track",
+			"documentation": "Solo the current track for playback.",
+			"insertText": "\\solo ${1:true}"
+		},
+		{
+			"name": "scoreinfo",
+			"label": "\\scoreinfo",
+			"detail": "Score metadata",
+			"documentation": "Set various metadata or informational fields on the score.",
+			"insertText": "\\scoreinfo ${1:key} ${2:value}"
+		}
+	],
+	"properties": [
+		{
+			"name": "f",
+			"label": "f",
+			"detail": "Beat property: forte / volume indicator",
+			"documentation": "A beat-level property; commonly used for dynamics or effects."
+		},
+		{
+			"name": "p",
+			"label": "p",
+			"detail": "Beat property: piano",
+			"documentation": "A beat-level property for dynamics (piano)."
+		},
+		{
+			"name": "mf",
+			"label": "mf",
+			"detail": "Beat property: mezzo-forte",
+			"documentation": "Mid-level dynamic mark."
+		},
+		{
+			"name": "stacc",
+			"label": "stacc",
+			"detail": "Note property: staccato",
+			"documentation": "A note-level articulation property (staccato)."
+		},
+		{
+			"name": "accent",
+			"label": "accent",
+			"detail": "Note property: accent",
+			"documentation": "A note-level articulation indicating accent."
+		},
+		{
+			"name": "sustain",
+			"label": "sustain",
+			"detail": "Note property: sustain",
+			"documentation": "Indicates a sustained note (long/legato)."
+		},
+		{
+			"name": "duration",
+			"label": "duration",
+			"detail": "Duration / length specifier",
+			"documentation": "Control the length/duration of the note/beat (e.g., 4., 8)."
+		},
+		{
+			"name": "fo",
+			"label": "fo",
+			"detail": "beat property • Fade-Out",
+			"documentation": "Adds a fade-out effect to the beat. Applies to all notes."
+		},
+		{
+			"name": "vs",
+			"label": "vs",
+			"detail": "beat property • Volume-Swell",
+			"documentation": "Adds a volume-swell effect to the beat. Applies to all notes."
+		},
+		{
+			"name": "v",
+			"label": "v",
+			"detail": "beat property • Slight Vibrato",
+			"documentation": "Adds a slight vibrato effect to the beat. Applies to all notes."
+		},
+		{
+			"name": "vw",
+			"label": "vw",
+			"detail": "beat property • Wide Vibrato",
+			"documentation": "Adds a wide vibrato effect to the beat. Applies to all notes."
+		},
+		{
+			"name": "s",
+			"label": "s",
+			"detail": "beat property • Slap",
+			"documentation": "Adds a bass slap annotation to the beat."
+		},
+		{
+			"name": "tt",
+			"label": "tt",
+			"detail": "beat property • Tapping",
+			"documentation": "Adds a guitar or bass tapping annotation to the beat."
+		},
+		{
+			"name": "d",
+			"label": "d",
+			"detail": "beat property • Augmentation Dot",
+			"documentation": "Marks the beat with a single augmentation dot."
+		},
+		{
+			"name": "dd",
+			"label": "dd",
+			"detail": "beat property • Double Augmentation Dot",
+			"documentation": "Marks the beat with a double augmentation dot."
+		},
+		{
+			"name": "su",
+			"label": "su",
+			"detail": "beat property • Pick-Stroke Up",
+			"documentation": "Adds an upwards pick-stroke annotation to the beat."
+		},
+		{
+			"name": "sd",
+			"label": "sd",
+			"detail": "beat property • Pick-Stroke Down",
+			"documentation": "Adds an downwards pick-stroke annotation to the beat."
+		},
+		{
+			"name": "cre",
+			"label": "cre",
+			"detail": "beat property • Crescendo",
+			"documentation": "Adds a crescendo effect to the beat."
+		},
+		{
+			"name": "dec",
+			"label": "dec",
+			"detail": "beat property • Decrescendo",
+			"documentation": "Adds a decrescendo (diminuendo) effect to the beat."
+		},
+		{
+			"name": "spd",
+			"label": "spd",
+			"detail": "beat property • Sustain pedal down",
+			"documentation": "Add a sustain pedal down-press to the beat."
+		},
+		{
+			"name": "sph",
+			"label": "sph",
+			"detail": "beat property • Sustain pedal hold",
+			"documentation": "Add a sustain pedal hold to the beat."
+		},
+		{
+			"name": "spu",
+			"label": "spu",
+			"detail": "beat property • Sustain pedal up",
+			"documentation": "Add a sustain pedal up (release) to the beat."
+		},
+		{
+			"name": "spe",
+			"label": "spe",
+			"detail": "beat property • Sustain pedal up (end)",
+			"documentation": "Add a sustain pedal up (release) to the end of the beat."
+		},
+		{
+			"name": "slashed",
+			"label": "slashed",
+			"detail": "beat property • Slash Notation",
+			"documentation": "Marks the beat to be displayed with slash notation."
+		},
+		{
+			"name": "ds",
+			"label": "ds",
+			"detail": "beat property • Dead-Slap",
+			"documentation": "Marks the beat to be a dead-slap beat.\n\nAs no notes should be on such a beat, simply use () to indicate the empty beat which is not a rest.\n"
+		},
+		{
+			"name": "glpf",
+			"label": "glpf",
+			"detail": "beat property • Golpe (Finger)",
+			"documentation": "Adds a golpe finger-tap effect to the beat."
+		},
+		{
+			"name": "glpt",
+			"label": "glpt",
+			"detail": "beat property • Golpe (Thumb)",
+			"documentation": "Adds a golpe thumb-tap effect to the beat."
+		},
+		{
+			"name": "waho",
+			"label": "waho",
+			"detail": "beat property • Wah-Wah (Open)",
+			"documentation": "Adds a Wah-pedal opening effect to the beat."
+		},
+		{
+			"name": "wahc",
+			"label": "wahc",
+			"detail": "beat property • Wah-Wah (Close)",
+			"documentation": "Adds a Wah-pedal close effect to the beat."
+		},
+		{
+			"name": "legatoOrigin",
+			"label": "legatoOrigin",
+			"detail": "beat property • Legato",
+			"documentation": "Adds a legato from this beat to the next one."
+		},
+		{
+			"name": "timer",
+			"label": "timer",
+			"detail": "beat property • Show timestamp",
+			"documentation": "Adds a timestamp marker to the beat.\n\nTimers are showing the exact timestamp when a beat is played the first time (respecting aspects like repeats).\n"
+		},
+		{
+			"name": "tu",
+			"label": "tu",
+			"detail": "beat property • Tuplet",
+			"documentation": "Adds a tuplet to the beat duration.\n\nThere are some built-in simple tuplet variants or you can specify the exact division.\n"
+		},
+		{
+			"name": "txt",
+			"label": "txt",
+			"detail": "beat property • Text",
+			"documentation": "Adds a text annotation to the beat."
+		},
+		{
+			"name": "lyrics",
+			"label": "lyrics",
+			"detail": "beat property • Lyrics",
+			"documentation": "Adds a lyric text to the beat.\n\nThis is an alternative way of applying the exact lyrics to beats instead of using the `\\lyrics` metadata where a special syntax is used to spread the text across beats.\n"
+		},
+		{
+			"name": "tb",
+			"label": "tb",
+			"detail": "beat property • Tremolo Bar (Whammy)",
+			"documentation": "Adds a whammy bar (aka. tremolo bar) effect to the beat.\n\n* The `tb` variant automatically spreads the values across the duration of the beat.\n* The `tbe` (exact) variant allows specifying exactly at which offset a value is placed.\n\nIt is recommended to rely on the auto-detection of the type and only specify the type explicitly if something is wrong.\n"
+		},
+		{
+			"name": "tbe",
+			"label": "tbe",
+			"detail": "beat property • Tremolo Bar (Whammy) Exact",
+			"documentation": "Adds a whammy bar (aka. tremolo bar) effect to the beat.\n\n* The `tb` variant automatically spreads the values across the duration of the beat.\n* The `tbe` (exact) variant allows specifying exactly at which offset a value is placed.\n \nIt is recommended to rely on the auto-detection of the type and only specify the type explicitly if something is wrong.\n"
+		},
+		{
+			"name": "bu",
+			"label": "bu",
+			"detail": "beat property • Upwards brush-stroke",
+			"documentation": "Adds a brush stroke effect to the beat."
+		},
+		{
+			"name": "bd",
+			"label": "bd",
+			"detail": "beat property • Downwards brush-stroke",
+			"documentation": "Adds a brush stroke effect to the beat."
+		},
+		{
+			"name": "au",
+			"label": "au",
+			"detail": "beat property • Upwards Arpeggio",
+			"documentation": "Adds an arpeggio effect to the beat."
+		},
+		{
+			"name": "ad",
+			"label": "ad",
+			"detail": "beat property • Downwards Arpeggio",
+			"documentation": "Adds an arpeggio effect to the beat."
+		},
+		{
+			"name": "ch",
+			"label": "ch",
+			"detail": "beat property • Chord",
+			"documentation": "Adds a chord annotation to the beat.\n\nIf the staff has a definition for this chord it will be shown in the chord diagram list to indicate its usage. The beat still has to define the notes separately.\n"
+		},
+		{
+			"name": "gr",
+			"label": "gr",
+			"detail": "beat property • Grace-Beat",
+			"documentation": "Marks the beat as a grace beat holding grace notes.\n"
+		},
+		{
+			"name": "dy",
+			"label": "dy",
+			"detail": "beat property • Dynamics",
+			"documentation": "Defines the play dynamics for this beat."
+		},
+		{
+			"name": "tempo",
+			"label": "tempo",
+			"detail": "beat property • Tempo Change",
+			"documentation": "Add a tempo change to the beat."
+		},
+		{
+			"name": "volume",
+			"label": "volume",
+			"detail": "beat property • Volume Change",
+			"documentation": "Add a volume change to the beat.\n\nThe change affects all beats after this one.\n"
+		},
+		{
+			"name": "balance",
+			"label": "balance",
+			"detail": "beat property • Balance Change",
+			"documentation": "Add a balance (pan) change to the beat.\n\nThe change affects all beats after this one.\n"
+		},
+		{
+			"name": "tp",
+			"label": "tp",
+			"detail": "beat property • Tremolo Picking",
+			"documentation": "Add a tremolo picking to the beat."
+		},
+		{
+			"name": "barre",
+			"label": "barre",
+			"detail": "beat property • Barré",
+			"documentation": "Add a barré chord notation to the beat."
+		},
+		{
+			"name": "rasg",
+			"label": "rasg",
+			"detail": "beat property • Rasgueado",
+			"documentation": "Add a rasgueado play pattern to the beat."
+		},
+		{
+			"name": "ot",
+			"label": "ot",
+			"detail": "beat property • Ottava",
+			"documentation": "Adds a octave change (ottava) to the beat."
+		},
+		{
+			"name": "instrument",
+			"label": "instrument",
+			"detail": "beat property • Instrument Change",
+			"documentation": "Adds a instrument change to the beat."
+		},
+		{
+			"name": "bank",
+			"label": "bank",
+			"detail": "beat property • MIDI Bank Change",
+			"documentation": "Adds a instrument bank change to the beat."
+		},
+		{
+			"name": "fermata",
+			"label": "fermata",
+			"detail": "beat property • Fermata",
+			"documentation": "Adds a fermata to the beat."
+		},
+		{
+			"name": "beam",
+			"label": "beam",
+			"detail": "beat property • Beams and Stems",
+			"documentation": "Changes the beaming and stem direction for the beat.\nCan be specified multiple times.\n"
+		},
+		{
+			"name": "nh",
+			"label": "nh",
+			"detail": "note property • Natural Harmonic",
+			"documentation": "Applies a natural harmonic effect to the note (for fretted instruments)."
+		},
+		{
+			"name": "ah",
+			"label": "ah",
+			"detail": "note property • Artificial Harmonic",
+			"documentation": "Applies an artificial harmonic effect to the note (for fretted instruments)."
+		},
+		{
+			"name": "th",
+			"label": "th",
+			"detail": "note property • Tapped Harmonic",
+			"documentation": "Applies a tapped harmonic effect to the note (for fretted instruments)."
+		},
+		{
+			"name": "ph",
+			"label": "ph",
+			"detail": "note property • Pinch Harmonic",
+			"documentation": "Applies a pinch harmonic effect to the note (for fretted instruments)."
+		},
+		{
+			"name": "sh",
+			"label": "sh",
+			"detail": "note property • Semi Harmonic",
+			"documentation": "Applies a semi harmonic effect to the note (for fretted instruments)."
+		},
+		{
+			"name": "fh",
+			"label": "fh",
+			"detail": "note property • Feedback Harmonic",
+			"documentation": "Applies a feedback harmonic effect to the note (for fretted instruments)."
+		},
+		{
+			"name": "sl",
+			"label": "sl",
+			"detail": "note property • Slide (legato)",
+			"documentation": "Adds a legato slide effect to the note."
+		},
+		{
+			"name": "ss",
+			"label": "ss",
+			"detail": "note property • Slide (shift)",
+			"documentation": "Adds a shift slide effect to the note."
+		},
+		{
+			"name": "sib",
+			"label": "sib",
+			"detail": "note property • Slide (into from-below)",
+			"documentation": "Adds a slide effect into the note from below."
+		},
+		{
+			"name": "sia",
+			"label": "sia",
+			"detail": "note property • Slide (into from-above)",
+			"documentation": "Adds a slide effect into the note from above."
+		},
+		{
+			"name": "sou",
+			"label": "sou",
+			"detail": "note property • Slide (out upwards)",
+			"documentation": "Adds a slide effect out from note upwards."
+		},
+		{
+			"name": "sod",
+			"label": "sod",
+			"detail": "note property • Slide (out downwards)",
+			"documentation": "Adds a slide effect out from note downwards."
+		},
+		{
+			"name": "psu",
+			"label": "psu",
+			"detail": "note property • Pick-Slide (upwards)",
+			"documentation": "Adds a pick slide effect out from note upwards."
+		},
+		{
+			"name": "psd",
+			"label": "psd",
+			"detail": "note property • Pick-Slide (downwards)",
+			"documentation": "Adds a pick slide effect out from note downwards."
+		},
+		{
+			"name": "h",
+			"label": "h",
+			"detail": "note property • Hammer-On/Pull-Off",
+			"documentation": "Applies a hammer on / pull-off effect to the note.\n\nThe fret of the following note on the same string defines whether it is a hammer-on or pull-of.\n"
+		},
+		{
+			"name": "lht",
+			"label": "lht",
+			"detail": "note property • Left-Hand tap",
+			"documentation": "Applies a left-hand-tapped annotation to the note."
+		},
+		{
+			"name": "g",
+			"label": "g",
+			"detail": "note property • Ghost Note",
+			"documentation": "Marks the note as a ghost note."
+		},
+		{
+			"name": "ac",
+			"label": "ac",
+			"detail": "note property • Accentuated",
+			"documentation": "Applies a simple accentuation to the note."
+		},
+		{
+			"name": "hac",
+			"label": "hac",
+			"detail": "note property • Heavy-Accentuated",
+			"documentation": "Applies a heavy accentuation to the note."
+		},
+		{
+			"name": "ten",
+			"label": "ten",
+			"detail": "note property • Tenuto",
+			"documentation": "Applies a tenuto accentuation to the note."
+		},
+		{
+			"name": "tr",
+			"label": "tr",
+			"detail": "note property • Trill",
+			"documentation": "Applies a trill effect to the note."
+		},
+		{
+			"name": "pm",
+			"label": "pm",
+			"detail": "note property • Palm-Mute",
+			"documentation": "Applies a palm mute effect to the note."
+		},
+		{
+			"name": "st",
+			"label": "st",
+			"detail": "note property • Staccato",
+			"documentation": "Applies a staccato effect to the note."
+		},
+		{
+			"name": "lr",
+			"label": "lr",
+			"detail": "note property • LetRing",
+			"documentation": "Applies a LetRing effect to the note."
+		},
+		{
+			"name": "x",
+			"label": "x",
+			"detail": "note property • Dead-Note",
+			"documentation": "Marks the note as a dead note."
+		},
+		{
+			"name": "t",
+			"label": "t",
+			"detail": "note property • Tied-Note",
+			"documentation": "Marks the note as a tied note.\n\nThis is an alternative syntax to directly specifying the fret as `-`.\n\nFor non stringed instrument it can be a bit more tricky as we cannot use the string to identify which note to tie. There are multiple ways to work around this problem. AlphaTab will try to find the start note for the tie via several rules, if this does not match the desired behavior, you can specify the note value as alternative and indicate the tie via a note effect.\n"
+		},
+		{
+			"name": "turn",
+			"label": "turn",
+			"detail": "note property • Turn Ornament",
+			"documentation": "Applies a turn ornament to the note."
+		},
+		{
+			"name": "iturn",
+			"label": "iturn",
+			"detail": "note property • Inverted Turn Ornament",
+			"documentation": "Applies an inverted turn ornament to the note."
+		},
+		{
+			"name": "umordent",
+			"label": "umordent",
+			"detail": "note property • Upper Mordent Ornament",
+			"documentation": "Applies an upper mordent ornament to the note."
+		},
+		{
+			"name": "lmordent",
+			"label": "lmordent",
+			"detail": "note property • Lower Mordent Ornament",
+			"documentation": "Applies an lower mordent ornament to the note."
+		},
+		{
+			"name": "string",
+			"label": "string",
+			"detail": "note property • Show String Number",
+			"documentation": "Adds an annotation showing the string number of the note above the staff."
+		},
+		{
+			"name": "hide",
+			"label": "hide",
+			"detail": "note property • Hide Note",
+			"documentation": "Hides the note from being displayed in the music sheet."
+		},
+		{
+			"name": "b",
+			"label": "b",
+			"detail": "note property • Note Bend",
+			"documentation": "Adds a bend effect to the note.\n\n* The `b` variant automatically spreads the values across the duration of the beat.\n* The `be` (exact) variant allows specifying exactly at which offset a value is placed.\n\nIt is recommended to rely on the auto-detection of the type and only specify the type explicitly if something is wrong.\n"
+		},
+		{
+			"name": "be",
+			"label": "be",
+			"detail": "note property • Note Bend (exact)",
+			"documentation": "Adds an exact bend effect to the note.\n\n* The `b` variant automatically spreads the values across the duration of the beat.\n* The `be` (exact) variant allows specifying exactly at which offset a value is placed.\n\nIt is recommended to rely on the auto-detection of the type and only specify the type explicitly if something is wrong.\n"
+		},
+		{
+			"name": "lf",
+			"label": "lf",
+			"detail": "note property • Left-Hand Finger",
+			"documentation": "Adds a left-hand fingering annotation to the note."
+		},
+		{
+			"name": "rf",
+			"label": "rf",
+			"detail": "note property • Right-Hand Finger",
+			"documentation": "Adds a right-hand fingering annotation to the note."
+		},
+		{
+			"name": "acc",
+			"label": "acc",
+			"detail": "note property • Accidentals",
+			"documentation": "Changes the mode to determine the accidentals for this note."
+		},
+		{
+			"name": "slur",
+			"label": "slur",
+			"detail": "note property • Slur",
+			"documentation": "Marks the start or end of a slur for the note."
+		},
+		{
+			"name": "-",
+			"label": "-",
+			"detail": "note property • Tied-Note",
+			"documentation": "Marks the note as a tied note.\n\nThis is an alternative syntax to directly specifying the fret as `-`.\n\nFor non stringed instrument it can be a bit more tricky as we cannot use the string to identify which note to tie. There are multiple ways to work around this problem. AlphaTab will try to find the start note for the tie via several rules, if this does not match the desired behavior, you can specify the note value as alternative and indicate the tie via a note effect.\n"
+		}
+	]
+}

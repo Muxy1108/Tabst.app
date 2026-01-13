@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+  workflow_dispatch: {}
+
+jobs:
+  lint:
+    name: Lint (pnpm lint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20.x"
+          cache: "pnpm"
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Check pnpm version
+        run: pnpm -v
+
+      - name: Ensure pnpm uses hoisted node linker
+        run: pnpm config set node-linker hoisted
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run lint
+        run: pnpm lint
+
+  package:
+    name: Package (pnpm package)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20.x"
+          cache: "pnpm"
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Check pnpm version
+        run: pnpm -v
+
+      - name: Ensure pnpm uses hoisted node linker
+        run: pnpm config set node-linker hoisted
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Package (build/distribute)
+        run: pnpm package

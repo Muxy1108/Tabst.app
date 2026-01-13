@@ -1,0 +1,16 @@
+{
+	"commands": [
+		{
+			"name": "chord",
+			"label": "\\chord",
+			"detail": "Insert a chord",
+			"documentation": "Insert chord name or power chord information for a given beat.",
+			"insertText": "\\chord \"${1}\""
+		}
+	],
+	"abbreviations": {
+		"cho": "\\chord \"${1}\"",
+		"/*": "/* ${1} */"
+	},
+	"properties": []
+}

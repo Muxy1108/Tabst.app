@@ -1,0 +1,213 @@
+import {
+	type Extension,
+	RangeSetBuilder,
+	StateEffect,
+	StateField,
+} from "@codemirror/state";
+import {
+	Decoration,
+	type DecorationSet,
+	EditorView,
+	ViewPlugin,
+	type ViewUpdate,
+	WidgetType,
+} from "@codemirror/view";
+import type { AlphaTexLSPClient } from "./alphatex-lsp";
+
+/**
+ * Effect to update barlines in the editor state
+ */
+export const setBarlinesEffect =
+	StateEffect.define<
+		Array<{ line: number; character: number; barNumber: number }>
+	>();
+
+/**
+ * Widget to render a bar number next to or instead of the barline
+ */
+class BarlineWidget extends WidgetType {
+	constructor(readonly barNumber: number) {
+		super();
+	}
+
+	toDOM() {
+		const span = document.createElement("span");
+		span.className = "cm-barline-widget";
+		// Styling to make it look like a "slightly thick square with a number"
+		Object.assign(span.style, {
+			display: "inline-flex",
+			alignItems: "center",
+			justifyContent: "center",
+			backgroundColor: "hsl(var(--primary) / 0.15)",
+			border: "1.5px solid hsl(var(--primary) / 0.5)",
+			borderRadius: "3px",
+			padding: "0 3px",
+			margin: "0 2px 0 4px",
+			fontSize: "10px",
+			lineHeight: "1",
+			height: "14px",
+			minWidth: "16px",
+			fontWeight: "bold",
+			color: "hsl(var(--primary))",
+			verticalAlign: "middle",
+			cursor: "default",
+			userSelect: "none",
+			pointerEvents: "none",
+		});
+		span.textContent = this.barNumber.toString();
+		span.title = `Measure ${this.barNumber}`;
+		return span;
+	}
+
+	ignoreEvent() {
+		return true;
+	}
+}
+
+/**
+ * State field to manage barline decorations
+ */
+const barlinesField = StateField.define<DecorationSet>({
+	create() {
+		return Decoration.none;
+	},
+	update(barlines, tr) {
+		barlines = barlines.map(tr.changes);
+		for (const e of tr.effects) {
+			if (e.is(setBarlinesEffect)) {
+				const builder = new RangeSetBuilder<Decoration>();
+				const sortedBarlines = [...e.value].sort((a, b) => {
+					if (a.line !== b.line) return a.line - b.line;
+					return a.character - b.character;
+				});
+
+				let lastPos = -1;
+				for (const bar of sortedBarlines) {
+					try {
+						if (bar.line + 1 > tr.state.doc.lines) continue;
+						const line = tr.state.doc.line(bar.line + 1);
+						const pos = line.from + bar.character;
+
+						// Ensure position is strictly increasing for RangeSetBuilder
+						if (pos <= lastPos) continue;
+
+						// Ensure position is within bounds and actually a '|'
+						if (pos < tr.state.doc.length) {
+							const char = tr.state.doc.sliceString(pos, pos + 1);
+							if (char === "|") {
+								builder.add(
+									pos + 1,
+									pos + 1,
+									Decoration.widget({
+										widget: new BarlineWidget(bar.barNumber),
+										side: 1,
+									}),
+								);
+								// Record the actual position used (pos + 1) to keep ordering strict
+								lastPos = pos + 1;
+							}
+						}
+					} catch (err) {
+						void err; // Ignore errors during rapid edits
+					}
+				}
+				try {
+					return builder.finish();
+				} catch (err) {
+					console.error("Failed to finish barline decorations:", err);
+					return barlines;
+				}
+			}
+		}
+		return barlines;
+	},
+	provide: (f) => EditorView.decorations.from(f),
+});
+
+/**
+ * Extension that periodically updates barlines from LSP
+ */
+export function createAlphaTexBarlinesExtension(
+	lspClient: AlphaTexLSPClient,
+): Extension {
+	const barlinesPlugin = ViewPlugin.fromClass(
+		class {
+			timer: number | null = null;
+			requestId = 0;
+			view: EditorView;
+
+			constructor(view: EditorView) {
+				this.view = view;
+				// Schedule an initial run on mount
+				this.schedule();
+			}
+
+			update(update: ViewUpdate) {
+				// Trigger when document changes or when first empty document
+				if (
+					update.docChanged ||
+					update.startState.doc.length === 0 ||
+					update.viewportChanged
+				) {
+					this.schedule();
+				}
+			}
+
+			schedule() {
+				if (this.timer) clearTimeout(this.timer);
+				// If autocompletion UI is currently open, postpone barline update
+				// to avoid interfering with the completion dropdown (which can be
+				// closed by editor state transactions).
+				if (this.view.dom?.querySelector?.(".cm-tooltip-autocomplete")) {
+					this.timer = window.setTimeout(() => {
+						this.timer = null;
+						this.schedule();
+					}, 300);
+					return;
+				}
+				const id = ++this.requestId;
+				this.timer = window.setTimeout(() => {
+					this.timer = null;
+					const text = this.view.state.doc.toString();
+					// Capture id at send time to detect stale responses
+					const sentId = id;
+					lspClient
+						.request("textDocument/barlines", { text })
+						.then((res) => {
+							// If another request has been scheduled after this one, drop response
+							if (sentId !== this.requestId) return;
+							const { barlines } = res as {
+								barlines: Array<{
+									line: number;
+									character: number;
+									barNumber: number;
+								}>;
+							};
+							if (!barlines) return;
+							const view = this.view;
+							// If the view was destroyed or detached before the LSP responded,
+							// avoid dispatching to prevent internal view errors.
+							if (!view || !view.dom || !document.contains(view.dom)) return;
+							try {
+								view.dispatch({ effects: setBarlinesEffect.of(barlines) });
+							} catch (err) {
+								console.error("Failed to apply barlines:", err);
+							}
+						})
+						.catch((err) => console.error("Failed to fetch barlines:", err));
+				}, 500);
+			}
+
+			destroy() {
+				if (this.timer) clearTimeout(this.timer);
+				// Invalidate any in-flight responses
+				this.requestId++;
+			}
+		},
+		{
+			// Nothing special in spec for now
+		},
+	);
+
+	return [barlinesField, barlinesPlugin];
+}

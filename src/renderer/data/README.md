@@ -1,0 +1,3 @@
+- `alphatex-commands.generated.json`
+- `alphatex-commands.json`
+- 计划添加： 和弦指法库，用于补全 \chord 命令 `chord.json`
