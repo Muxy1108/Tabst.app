@@ -1,8 +1,24 @@
-# Tabst.app
+# Tabst
 
 Write guitar tabs like markdown.
 
-## 技术栈
+## Feature 功能
+
+Write. Play. Share.
+
+高效书写alphaTex. 播放曲谱. 分享PDF/GP.
+
+## Why Tabst 为什么我要写这个软件
+
+向笨重的二进制和xml说不，世界属于纯文本。
+
+既然文档写作已经有开箱即用的广大 Markdown 编辑器，追求精确排版的LaTeX和创新的Typst，为什么在吉他谱领域，还要像 word 一样在曲谱上点点点把音符连接起来？
+
+MusiXTeX, Lilypond 在乐谱标记语言上做出了出版级的表率，而 alphaTab.js 让可交互可播放的乐谱成为可能。
+
+这只是一个开始，我的愿景是将散落为pdf/图片的曲谱们都转化为 Tabst 中存储的alphaTex. 视觉大模型（OMR光学音符识别）正在路上。
+
+## Tech Stack 技术栈
 
 - pnpm
 - TypeScript
