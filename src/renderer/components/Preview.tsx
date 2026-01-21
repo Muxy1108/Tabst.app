@@ -7,17 +7,61 @@ import {
 	Pause,
 	Play,
 	Plus,
+	Printer,
 	Slash,
 	Square,
 	Waves,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPreviewSettings } from "../lib/alphatab-config";
+import { formatFullError } from "../lib/alphatab-error";
 import { loadBravuraFont, loadSoundFontFromUrl } from "../lib/assets";
+import type { ResourceUrls } from "../lib/resourceLoaderService";
 import { getResourceUrls } from "../lib/resourceLoaderService";
+import {
+	applyStaffConfig,
+	type StaffDisplayOptions,
+	toggleFirstStaffOption,
+} from "../lib/staff-config";
 import {
 	getAlphaTabColorsForTheme,
 	setupThemeObserver,
 } from "../lib/themeManager";
+import { useAppStore } from "../store/appStore";
+import PrintPreview from "./PrintPreview";
+
+/**
+ * 根据 barIndex 和 beatIndex 从乐谱中查找对应的 Beat 对象
+ */
+function findBeatInScore(
+	score: alphaTab.model.Score | null | undefined,
+	barIndex: number,
+	beatIndex: number,
+): alphaTab.model.Beat | null {
+	if (!score?.tracks?.length) return null;
+
+	// 遍历第一个音轨的所有 staff
+	const track = score.tracks[0];
+	for (const staff of track.staves) {
+		for (const bar of staff.bars) {
+			if (bar.index === barIndex) {
+				// 找到对应小节，查找 beat
+				for (const voice of bar.voices) {
+					for (const beat of voice.beats) {
+						if (beat.index === beatIndex) {
+							return beat;
+						}
+					}
+				}
+				// 如果找不到精确的 beatIndex，返回该小节的第一个 beat
+				if (bar.voices[0]?.beats?.length > 0) {
+					return bar.voices[0].beats[0];
+				}
+			}
+		}
+	}
+	return null;
+}
 
 export interface PreviewProps {
 	fileName?: string;
@@ -69,30 +113,18 @@ export default function Preview({
 	const [restorePerformed, setRestorePerformed] = useState(false);
 	// 记录最新内容，供异步回调和主题重建使用
 	const latestContentRef = useRef<string>(content ?? "");
+	// 打印预览状态和重新初始化触发器
+	const [showPrintPreview, setShowPrintPreview] = useState(false);
+	const [reinitTrigger, setReinitTrigger] = useState(0);
+
+	// 🆕 订阅编辑器光标位置，用于反向同步（编辑器 → 乐谱）
+	const editorCursor = useAppStore((s) => s.editorCursor);
+	// 防止因乐谱选择触发的光标更新导致循环
+	const isEditorCursorFromScoreRef = useRef(false);
 
 	useEffect(() => {
 		latestContentRef.current = content ?? "";
 	}, [content]);
-
-	// AlphaTab error shape helpers
-	type AlphaTabDiagnostic = {
-		message?: string;
-		range?: { start?: { line?: number; character?: number } };
-		line?: number;
-		character?: number;
-		col?: number;
-	};
-	type AlphaTabErrorLike = {
-		message?: string;
-		error?: string;
-		type?: string | number;
-		errorType?: string;
-		lexerDiagnostics?: string;
-		parserDiagnostics?: AlphaTabDiagnostic[];
-		semanticDiagnostics?: AlphaTabDiagnostic[];
-		diagnostics?: AlphaTabDiagnostic[] | unknown;
-		toString?: () => string;
-	};
 
 	const toggleFirstStaffOpt = (
 		key:
@@ -102,57 +134,10 @@ export default function Preview({
 			| "showNumbered",
 	) => {
 		const api = apiRef.current;
-		if (!api || !api.score) return;
-		const firstTrack = api.score.tracks?.[0];
-		if (!firstTrack || !firstTrack.staves || firstTrack.staves.length === 0)
-			return;
+		if (!api) return;
 
-		const s0 = firstTrack.staves[0] as alphaTab.model.Staff;
-		let current = false;
-		switch (key) {
-			case "showTablature":
-				current = !!s0.showTablature;
-				break;
-			case "showStandardNotation":
-				current = !!s0.showStandardNotation;
-				break;
-			case "showSlash":
-				current = !!s0.showSlash;
-				break;
-			case "showNumbered":
-				current = !!s0.showNumbered;
-				break;
-		}
-
-		// If toggling off would disable all options for this staff, prevent it
-		const totalSelected =
-			Number(!!s0.showTablature) +
-			Number(!!s0.showStandardNotation) +
-			Number(!!s0.showSlash) +
-			Number(!!s0.showNumbered);
-		// Only block when we're turning off the *only* active option (current === true)
-		if (totalSelected === 1 && current) {
-			// toggling on is always okay, toggling off when only one is selected should be blocked
-			return;
-		}
-
-		const newValue = !current;
-		firstTrack.staves.forEach((st: alphaTab.model.Staff) => {
-			switch (key) {
-				case "showTablature":
-					st.showTablature = newValue;
-					break;
-				case "showStandardNotation":
-					st.showStandardNotation = newValue;
-					break;
-				case "showSlash":
-					st.showSlash = newValue;
-					break;
-				case "showNumbered":
-					st.showNumbered = newValue;
-					break;
-			}
-		});
+		const newValue = toggleFirstStaffOption(api, key);
+		if (newValue === null) return; // 切换失败或不允许
 
 		// Update UI state for compact display
 		setFirstStaffOptions((prev) => ({
@@ -165,9 +150,6 @@ export default function Preview({
 			...trackConfigRef.current,
 			[key]: newValue,
 		};
-
-		// Re-render only the first track
-		api.renderTracks([firstTrack]);
 	};
 
 	// Apply zoom to alphaTab API
@@ -193,42 +175,100 @@ export default function Preview({
 	 * 从 trackConfigRef 读取保存的配置，如果没有则使用默认值
 	 */
 	const applyTracksConfig = useCallback((api: alphaTab.AlphaTabApi) => {
-		if (!api.score?.tracks?.length) return;
-
-		const firstTrack = api.score.tracks[0];
-		if (!firstTrack.staves?.length) return;
-
 		// 从 ref 获取保存的配置，如果没有则使用默认值
-		const config = trackConfigRef.current || {
+		const config: StaffDisplayOptions = trackConfigRef.current || {
 			showTablature: true,
 			showStandardNotation: false,
 			showSlash: false,
 			showNumbered: false,
 		};
 
-		// 应用配置到所有 staff
-		firstTrack.staves.forEach((st: alphaTab.model.Staff) => {
-			st.showTablature = config.showTablature ?? true;
-			st.showStandardNotation = config.showStandardNotation ?? false;
-			st.showSlash = config.showSlash ?? false;
-			st.showNumbered = config.showNumbered ?? false;
-		});
-
-		// 更新 UI state
-		const s0 = firstTrack.staves[0];
-		setFirstStaffOptions({
-			showTablature: s0.showTablature,
-			showStandardNotation: s0.showStandardNotation,
-			showSlash: s0.showSlash,
-			showNumbered: s0.showNumbered,
-		});
-
-		// 重新渲染
-		api.renderTracks([firstTrack]);
+		// 应用配置
+		const appliedConfig = applyStaffConfig(api, config);
+		if (appliedConfig) {
+			// 更新 UI state
+			setFirstStaffOptions(appliedConfig);
+		}
 	}, []);
+
+	/**
+	 * 🆕 监听编辑器光标变化，反向同步到乐谱选区
+	 * 实现点击编辑器代码定位到乐谱对应位置
+	 */
+	useEffect(() => {
+		const api = apiRef.current;
+		if (!api || !editorCursor) return;
+
+		// 检查是否是无效的位置（在元数据区域）
+		if (editorCursor.barIndex < 0 || editorCursor.beatIndex < 0) {
+			return;
+		}
+
+		// 防止循环：如果当前光标是由乐谱选择触发的，跳过
+		if (isEditorCursorFromScoreRef.current) {
+			isEditorCursorFromScoreRef.current = false;
+			return;
+		}
+
+		// 从当前乐谱中查找对应的 Beat
+		const score = api.score;
+		const beat = findBeatInScore(
+			score,
+			editorCursor.barIndex,
+			editorCursor.beatIndex,
+		);
+
+		if (beat) {
+			console.debug(
+				"[Preview] Editor cursor → Score sync:",
+				`Bar ${editorCursor.barIndex}, Beat ${editorCursor.beatIndex}`,
+			);
+
+			try {
+				// 使用 Selection API 高亮该 beat
+				if (typeof api.highlightPlaybackRange === "function") {
+					api.highlightPlaybackRange(beat, beat);
+				}
+
+				// 滚动到该 beat 所在位置（可选）
+				const bb = api.boundsLookup?.findBeat?.(beat);
+				if (bb && containerRef.current) {
+					const visual = bb.visualBounds;
+					const container = containerRef.current;
+					const containerRect = container.getBoundingClientRect();
+
+					// 检查 beat 是否在可视区域内
+					const beatTop = visual.y;
+					const beatBottom = visual.y + visual.h;
+					const scrollTop = container.scrollTop;
+					const viewportTop = scrollTop;
+					const viewportBottom = scrollTop + containerRect.height;
+
+					// 如果 beat 不在可视区域，滚动到它
+					if (beatTop < viewportTop || beatBottom > viewportBottom) {
+						container.scrollTo({
+							top: Math.max(0, beatTop - containerRect.height / 3),
+							behavior: "smooth",
+						});
+					}
+				}
+			} catch (e) {
+				console.debug("[Preview] Failed to sync editor cursor to score:", e);
+			}
+		}
+	}, [editorCursor]);
 
 	useEffect(() => {
 		if (!containerRef.current) return;
+
+		// 使用 reinitTrigger 触发重新初始化（例如从打印预览返回时）
+		if (reinitTrigger > 0) {
+			console.log(
+				"[Preview] Reinitializing alphaTab API (trigger:",
+				reinitTrigger,
+				")",
+			);
+		}
 
 		/**
 		 * 🆕 统一附加所有 alphaTab 事件监听器
@@ -255,12 +295,26 @@ export default function Preview({
 				setIsPlaying(false);
 				const cursor = cursorRef.current;
 				if (cursor) cursor.style.display = "none";
+				// 🆕 播放结束时清除编辑器中的播放高亮
+				useAppStore.getState().clearPlaybackBeat();
 			});
 
 			// 3. 播放进度（更新光标位置）
 			api.playedBeatChanged?.on((beat: alphaTab.model.Beat | null) => {
-				if (!beat) return;
+				if (!beat) {
+					// 播放停止时清除播放高亮（但保留 playerCursorPosition）
+					useAppStore.getState().clearPlaybackBeat();
+					return;
+				}
 				setIsPlaying(true);
+
+				// 🆕 更新播放位置到 store，触发编辑器高亮
+				const barIndex = beat.voice?.bar?.index ?? 0;
+				const beatIndex = beat.index ?? 0;
+				useAppStore.getState().setPlaybackBeat({ barIndex, beatIndex });
+				// 🆕 同时更新播放器光标位置（暂停后保留）
+				useAppStore.getState().setPlayerCursorPosition({ barIndex, beatIndex });
+
 				const cursor = cursorRef.current;
 				if (!cursor) return;
 				const bb = api.boundsLookup?.findBeat?.(beat);
@@ -276,102 +330,73 @@ export default function Preview({
 				cursor.style.height = `${visual.h}px`;
 			});
 
+			// 🆕 3.6. 点击曲谱时更新播放器光标位置（不播放也能设置）
+			api.beatMouseDown?.on((beat: alphaTab.model.Beat) => {
+				if (!beat) return;
+				const barIndex = beat.voice?.bar?.index ?? 0;
+				const beatIndex = beat.index ?? 0;
+				console.info("[Preview] Beat clicked:", `Bar ${barIndex}:${beatIndex}`);
+				// 🆕 清除播放高亮（绿色），让黄色小节高亮能够显示
+				useAppStore.getState().clearPlaybackBeat();
+				// 更新播放器光标位置，触发编辑器黄色高亮
+				useAppStore.getState().setPlayerCursorPosition({ barIndex, beatIndex });
+			});
+
+			// 🆕 3.5. Selection API (alphaTab 1.8.0+): 监听选区变化，同步到编辑器
+			try {
+				api.playbackRangeHighlightChanged?.on((e) => {
+					const { setScoreSelection, clearScoreSelection } =
+						useAppStore.getState();
+
+					// 如果没有选区，清除编辑器高亮
+					if (!e.startBeat || !e.endBeat) {
+						clearScoreSelection();
+						return;
+					}
+
+					// 标记：这次编辑器光标更新是由乐谱选择触发的，防止循环
+					isEditorCursorFromScoreRef.current = true;
+
+					// 从 Beat 对象中提取小节和 Beat 索引
+					const startBeat = e.startBeat;
+					const endBeat = e.endBeat;
+
+					// 获取小节索引
+					const startBarIndex = startBeat.voice?.bar?.index ?? 0;
+					const endBarIndex = endBeat.voice?.bar?.index ?? startBarIndex;
+
+					// 获取 Beat 在小节内的索引
+					const startBeatIndex = startBeat.index ?? 0;
+					const endBeatIndex = endBeat.index ?? 0;
+
+					console.info(
+						"[Preview] Selection changed:",
+						`Bar ${startBarIndex}:${startBeatIndex} -> Bar ${endBarIndex}:${endBeatIndex}`,
+					);
+
+					// 更新 store，触发 Editor 高亮
+					setScoreSelection({
+						startBarIndex,
+						startBeatIndex,
+						endBarIndex,
+						endBeatIndex,
+					});
+				});
+			} catch (e) {
+				console.debug(
+					"[Preview] playbackRangeHighlightChanged not available (requires alphaTab 1.8.0+):",
+					e,
+				);
+			}
+
 			// 4. 改进的错误处理：保留上一次成功的渲染
 			api.error.on((err: unknown) => {
 				console.error("[Preview] alphaTab error:", err);
 				console.error("[Preview] Error type:", typeof err, err);
 				console.error("[Preview] Error keys:", err ? Object.keys(err) : "null");
 
-				// 设置错误消息 - 兼容多种错误格式
-				let errorMessage = "未知错误";
-				let errorType = "解析错误";
-
-				if (err) {
-					// Narrow unknown to our custom type
-					const e = err as AlphaTabErrorLike;
-					errorMessage = e.message || e.error || e.toString?.() || "未知错误";
-					errorType = String(e.type ?? e.errorType ?? "AlphaTex");
-
-					// dev: append diagnostics if available (AlphaTab reports lexer/parser/semantic diagnostics)
-					if (e.lexerDiagnostics) {
-						errorMessage += `\n\nLexer diagnostics:\n${e.lexerDiagnostics}`;
-					}
-
-					const fmtDiagArray = (
-						arr: unknown[] | undefined,
-						name = "Diagnostics",
-					) => {
-						if (!arr || !Array.isArray(arr) || arr.length === 0) return "";
-						try {
-							return (
-								`${name}:\n` +
-								arr
-									.map((d) => {
-										// Common diagnostic shapes may include 'message' and 'range' / 'line' fields
-										const msg =
-											(d as { message?: string })?.message ?? JSON.stringify(d);
-										// range may be an object with start.line/character
-										const start = (
-											d as {
-												range?: {
-													start?: {
-														line?: number;
-														character?: number;
-														row?: number;
-														col?: number;
-													};
-												};
-											}
-										)?.range?.start;
-										if (start) {
-											const line = (start.line ?? start.row ?? 0) + 1;
-											const ch = (start.character ?? start.col ?? 0) + 1;
-											return `  - [${line}:${ch}] ${msg}`;
-										}
-										if (
-											d &&
-											typeof (d as { line?: number }).line === "number"
-										) {
-											const ln = ((d as { line?: number }).line ?? 0) + 1;
-											const ch =
-												((d as { character?: number; col?: number })
-													.character ??
-													(d as { character?: number; col?: number }).col ??
-													0) + 1;
-											return `  - [${ln}:${ch}] ${msg}`;
-										}
-										return `  - ${msg}`;
-									})
-									.join("\n")
-							);
-						} catch {
-							return `${name}: ${JSON.stringify(arr)}`;
-						}
-					};
-
-					if (Array.isArray(e.parserDiagnostics)) {
-						errorMessage +=
-							`\n\n` + fmtDiagArray(e.parserDiagnostics, "Parser diagnostics");
-					}
-					if (Array.isArray(e.semanticDiagnostics)) {
-						errorMessage +=
-							`\n\n` +
-							fmtDiagArray(e.semanticDiagnostics, "Semantic diagnostics");
-					}
-					// Fallback: some versions include a 'diagnostics' key
-					if (Array.isArray(e.diagnostics as unknown[])) {
-						errorMessage +=
-							`\n\n` + fmtDiagArray(e.diagnostics as unknown[], "Diagnostics");
-					} else if (e.diagnostics) {
-						try {
-							errorMessage += `\n\nDiagnostics:\n${JSON.stringify(e.diagnostics, null, 2)}`;
-						} catch {
-							// ignore stringify errors
-						}
-					}
-				}
-
-				const fullError = `${errorType}: ${errorMessage}`;
+				// 使用工具函数格式化错误
+				const fullError = formatFullError(err);
 				console.error("[Preview] Setting error state:", fullError);
 				setParseError(fullError);
 
@@ -461,35 +486,20 @@ export default function Preview({
 					// 获取当前主题的颜色
 					const colors = getAlphaTabColorsForTheme();
 
-					// 使用 ResourceLoaderService 提供的 worker URL
-					const settings: Record<string, unknown> = {
-						core: {
-							tex: true,
-							scriptFile: urls.workerUrl, // ← 关键：明确配置 worker 脚本路径
-							fontDirectory: urls.bravuraFontDirectory, // ← 直接使用资源服务提供的字体目录
-						},
-						display: {
-							layoutMode: alphaTab.LayoutMode.Page,
-							scale: zoomRef.current / 100,
-							// 在初始化时直接应用颜色配置
-							resources: {
-								mainGlyphColor: colors.mainGlyphColor,
-								secondaryGlyphColor: colors.secondaryGlyphColor,
-								staffLineColor: colors.staffLineColor,
-								barSeparatorColor: colors.barSeparatorColor,
-								barNumberColor: colors.barNumberColor,
-								scoreInfoColor: colors.scoreInfoColor,
-							},
-						},
-						player: {
-							playerMode: alphaTab.PlayerMode.EnabledAutomatic,
-							enablePlayer: true,
-							soundFont: urls.soundFontUrl, // ← 使用 URL 而不是硬编码路径
-							scrollMode: alphaTab.ScrollMode.OffScreen,
-							scrollElement: scrollEl,
-							scrollSpeed: 300,
-						},
-					};
+					// 使用工具函数创建预览配置
+					const settings = createPreviewSettings(urls as ResourceUrls, {
+						scale: zoomRef.current / 100,
+						scrollElement: scrollEl,
+						enablePlayer: true,
+						colors,
+					});
+
+					console.log("[Preview] AlphaTab initialization:", {
+						containerWidth: el.offsetWidth,
+						containerHeight: el.offsetHeight,
+						scale: zoomRef.current / 100,
+						layoutMode: alphaTab.LayoutMode[alphaTab.LayoutMode.Page],
+					});
 
 					apiRef.current = new alphaTab.AlphaTabApi(el, settings);
 
@@ -533,35 +543,16 @@ export default function Preview({
 									// 获取新的颜色配置
 									const newColors = getAlphaTabColorsForTheme();
 
-									// 重新创建 API 配置，使用新的颜色
-									const newSettings: Record<string, unknown> = {
-										core: {
-											tex: true,
-											scriptFile: urls.workerUrl,
-											fontDirectory: urls.bravuraFontDirectory,
-										},
-										display: {
-											layoutMode: alphaTab.LayoutMode.Page,
+									// 使用工具函数重新创建 API 配置
+									const newSettings = createPreviewSettings(
+										urls as ResourceUrls,
+										{
 											scale: zoomRef.current / 100,
-											// 使用新的颜色配置
-											resources: {
-												mainGlyphColor: newColors.mainGlyphColor,
-												secondaryGlyphColor: newColors.secondaryGlyphColor,
-												staffLineColor: newColors.staffLineColor,
-												barSeparatorColor: newColors.barSeparatorColor,
-												barNumberColor: newColors.barNumberColor,
-												scoreInfoColor: newColors.scoreInfoColor,
-											},
-										},
-										player: {
-											playerMode: alphaTab.PlayerMode.EnabledAutomatic,
-											enablePlayer: true,
-											soundFont: urls.soundFontUrl,
-											scrollMode: alphaTab.ScrollMode.OffScreen,
 											scrollElement: scrollEl,
-											scrollSpeed: 300,
+											enablePlayer: true,
+											colors: newColors,
 										},
-									};
+									);
 
 									// 创建新的 API
 									apiRef.current = new alphaTab.AlphaTabApi(el, newSettings);
@@ -723,7 +714,7 @@ export default function Preview({
 			}
 			pendingTexRef.current = null;
 		};
-	}, [applyTracksConfig]);
+	}, [applyTracksConfig, reinitTrigger]);
 
 	// 内容更新：仅调用 tex，不销毁 API，避免闪烁
 	useEffect(() => {
@@ -789,234 +780,290 @@ export default function Preview({
 		alphaTab.ScrollMode.OffScreen,
 	);
 
+	// 管理打印预览的生命周期：销毁和重建 alphaTab API 以避免设置污染
+	useEffect(() => {
+		if (showPrintPreview) {
+			// 打开打印预览：销毁当前 API 释放资源（特别是字体缓存）
+			console.log("[Preview] Destroying API for print preview");
+			if (apiRef.current) {
+				// 清理主题观察者
+				const unsubscribeTheme = (
+					apiRef.current as unknown as Record<string, unknown>
+				).__unsubscribeTheme;
+				if (typeof unsubscribeTheme === "function") {
+					unsubscribeTheme();
+				}
+				apiRef.current.destroy();
+				apiRef.current = null;
+			}
+		} else if (!showPrintPreview && !apiRef.current) {
+			// 关闭打印预览：延迟重新初始化 API，确保 PrintPreview 完全卸载
+			console.log(
+				"[Preview] Scheduling API reinitialization after print preview",
+			);
+			const timer = setTimeout(() => {
+				setReinitTrigger((prev) => prev + 1);
+			}, 150);
+			return () => clearTimeout(timer);
+		}
+	}, [showPrintPreview]);
+
 	return (
 		<div
 			className={`flex-1 flex flex-col h-full overflow-hidden ${className ?? ""}`}
 		>
-			{/* 错误提示已移到底部 */}
-			<div className="h-9 border-b border-border flex items-center px-3 text-xs text-muted-foreground shrink-0 gap-2 bg-card">
-				<FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-				<span className="sr-only">{fileName ?? "预览"}</span>
+			{/* 当打印预览显示时，隐藏主预览区域以避免资源冲突 */}
+			{!showPrintPreview && (
+				<>
+					{/* 错误提示已移到底部 */}
+					<div className="h-9 border-b border-border flex items-center px-3 text-xs text-muted-foreground shrink-0 gap-2 bg-card">
+						<FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+						<span className="sr-only">{fileName ?? "预览"}</span>
 
-				{/* First track staff options (TAB / Standard / Slash / Numbered) */}
-				{firstStaffOptions && (
-					<div className="ml-auto flex items-center gap-1">
-						<button
-							type="button"
-							className={`h-6 w-6 p-0.5 rounded ${
-								firstStaffOptions?.showStandardNotation
-									? "bg-blue-500/20 text-blue-600"
-									: "hover:bg-blue-500/20 hover:text-blue-600"
-							}`}
-							onClick={() => toggleFirstStaffOpt("showStandardNotation")}
-							title="标准记谱法（五线谱）"
-						>
-							<Music className="h-4 w-4" />
-						</button>
+						{/* First track staff options (TAB / Standard / Slash / Numbered) */}
+						{firstStaffOptions && (
+							<div className="ml-auto flex items-center gap-1">
+								<button
+									type="button"
+									className={`h-6 w-6 p-0.5 rounded ${
+										firstStaffOptions?.showStandardNotation
+											? "bg-blue-500/20 text-blue-600"
+											: "hover:bg-blue-500/20 hover:text-blue-600"
+									}`}
+									onClick={() => toggleFirstStaffOpt("showStandardNotation")}
+									title="标准记谱法（五线谱）"
+								>
+									<Music className="h-4 w-4" />
+								</button>
 
-						<button
-							type="button"
-							className={`h-6 w-6 p-0.5 rounded ${
-								firstStaffOptions?.showTablature
-									? "bg-blue-500/20 text-blue-600"
-									: "hover:bg-blue-500/20 hover:text-blue-600"
-							}`}
-							onClick={() => toggleFirstStaffOpt("showTablature")}
-							title="六线谱（TAB）"
-						>
-							<Hash className="h-4 w-4" />
-						</button>
+								<button
+									type="button"
+									className={`h-6 w-6 p-0.5 rounded ${
+										firstStaffOptions?.showTablature
+											? "bg-blue-500/20 text-blue-600"
+											: "hover:bg-blue-500/20 hover:text-blue-600"
+									}`}
+									onClick={() => toggleFirstStaffOpt("showTablature")}
+									title="六线谱（TAB）"
+								>
+									<Hash className="h-4 w-4" />
+								</button>
 
-						<button
-							type="button"
-							className={`h-6 w-6 p-0.5 rounded ${
-								firstStaffOptions?.showSlash
-									? "bg-blue-500/20 text-blue-600"
-									: "hover:bg-blue-500/20 hover:text-blue-600"
-							}`}
-							onClick={() => toggleFirstStaffOpt("showSlash")}
-							title="斜线记谱法（节拍）"
-						>
-							<Slash className="h-4 w-4" />
-						</button>
+								<button
+									type="button"
+									className={`h-6 w-6 p-0.5 rounded ${
+										firstStaffOptions?.showSlash
+											? "bg-blue-500/20 text-blue-600"
+											: "hover:bg-blue-500/20 hover:text-blue-600"
+									}`}
+									onClick={() => toggleFirstStaffOpt("showSlash")}
+									title="斜线记谱法（节拍）"
+								>
+									<Slash className="h-4 w-4" />
+								</button>
 
-						<button
-							type="button"
-							className={`h-6 w-6 p-0.5 rounded ${
-								firstStaffOptions?.showNumbered
-									? "bg-blue-500/20 text-blue-600"
-									: "hover:bg-blue-500/20 hover:text-blue-600"
-							}`}
-							onClick={() => toggleFirstStaffOpt("showNumbered")}
-							title="简谱（数字谱）"
-						>
-							<FileText className="h-3.5 w-3.5" />
-						</button>
-					</div>
-				)}
-
-				{/* Player controls: inline buttons (Play-Pause / Stop / Scroll) */}
-				<div className="ml-2 flex items-center gap-1">
-					{/* Player enable toggle removed: controls are always enabled */}
-
-					<button
-						type="button"
-						className={`h-6 w-6 p-0.5 rounded ${isPlaying ? "bg-blue-500/20 text-blue-600" : "hover:bg-blue-500/20 hover:text-blue-600"}`}
-						onClick={() => {
-							const api = apiRef.current;
-							if (!api) return;
-							try {
-								if (!isPlaying) {
-									api.play?.();
-									setIsPlaying(true);
-								} else {
-									api.pause?.();
-									setIsPlaying(false);
-								}
-							} catch (e) {
-								console.error("Failed play/pause:", e);
-							}
-						}}
-						title={isPlaying ? "暂停" : "播放"}
-					>
-						{isPlaying ? (
-							<Pause className="h-4 w-4" />
-						) : (
-							<Play className="h-4 w-4" />
-						)}
-					</button>
-
-					<button
-						type="button"
-						className={`h-6 w-6 p-0.5 rounded hover:bg-blue-500/20 hover:text-blue-600`}
-						onClick={() => {
-							const api = apiRef.current;
-							if (!api) return;
-							try {
-								api.stop?.();
-								setIsPlaying(false);
-							} catch (e) {
-								console.error("Failed stop:", e);
-							}
-						}}
-						title="停止"
-					>
-						<Square className="h-4 w-4" />
-					</button>
-
-					<button
-						type="button"
-						className={`h-6 w-6 p-0.5 rounded ${
-							scrollMode === alphaTab.ScrollMode.Continuous
-								? "bg-blue-500/20 text-blue-600"
-								: "hover:bg-blue-500/20 hover:text-blue-600"
-						}`}
-						onClick={() => {
-							const api = apiRef.current;
-							if (!api || !api.settings) return;
-							try {
-								const newMode =
-									scrollMode === alphaTab.ScrollMode.Continuous
-										? alphaTab.ScrollMode.OffScreen
-										: alphaTab.ScrollMode.Continuous;
-								setScrollMode(newMode);
-								(api.settings.player as alphaTab.PlayerSettings).scrollMode =
-									newMode;
-								api.updateSettings?.();
-							} catch (error) {
-								console.error("Failed to toggle scroll mode:", error);
-							}
-						}}
-						title={`滚动模式：${
-							scrollMode === alphaTab.ScrollMode.Continuous
-								? "连续滚动"
-								: "超出页面后滚动"
-						}`}
-					>
-						<Waves className="h-4 w-4" />
-					</button>
-				</div>
-				{/* Zoom controls: - button, percentage input, + button */}
-				<div className="ml-2 flex items-center gap-1">
-					<button
-						type="button"
-						className={`h-6 w-6 p-0.5 rounded hover:bg-blue-500/20 hover:text-blue-600`}
-						onClick={() => applyZoom(zoomPercent - 10)}
-						title="缩小"
-					>
-						<Minus className="h-4 w-4" />
-					</button>
-
-					<input
-						aria-label="缩放百分比"
-						value={zoomPercent}
-						onChange={(e) => {
-							const v = parseInt(e.target.value ?? "60", 10);
-							if (Number.isNaN(v)) return;
-							applyZoom(v);
-						}}
-						onBlur={(e) => {
-							const v = parseInt(e.target.value ?? "60", 10);
-							if (Number.isNaN(v)) return;
-							applyZoom(v);
-						}}
-						className="w-16 h-6 text-xs text-center rounded bg-transparent border border-border px-1 input-no-spinner"
-						step={1}
-						min={10}
-						max={400}
-						onKeyDown={(e) => {
-							if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-								e.preventDefault();
-							}
-						}}
-						onWheel={(e) => {
-							e.preventDefault();
-						}}
-						type="number"
-					/>
-					<span className="text-xs">%</span>
-
-					<button
-						type="button"
-						className={`h-6 w-6 p-0.5 rounded hover:bg-blue-500/20 hover:text-blue-600`}
-						onClick={() => applyZoom(zoomPercent + 10)}
-						title="放大"
-					>
-						<Plus className="h-4 w-4" />
-					</button>
-				</div>
-			</div>
-			<div className="flex-1 overflow-auto relative h-full">
-				<div ref={containerRef} className="w-full h-full" />
-				<div
-					ref={cursorRef}
-					className="pointer-events-none absolute z-20 bg-amber-300/40 rounded-sm"
-					style={{ display: "none" }}
-				/>
-			</div>
-			{parseError && (
-				<div className="bg-destructive/10 text-destructive px-3 py-2 text-xs border-t border-destructive/20 flex items-start gap-2">
-					<span className="font-semibold shrink-0">⚠️</span>
-					<div className="flex-1 min-w-0">
-						<div className="font-medium">AlphaTex 解析错误</div>
-						<div className="mt-0.5 text-destructive/80 break-words">
-							{parseError}
-						</div>
-						{restorePerformed && lastValidScoreRef.current && (
-							<div className="mt-1 text-destructive/60 text-[11px]">
-								已恢复到上一次成功的乐谱
+								<button
+									type="button"
+									className={`h-6 w-6 p-0.5 rounded ${
+										firstStaffOptions?.showNumbered
+											? "bg-blue-500/20 text-blue-600"
+											: "hover:bg-blue-500/20 hover:text-blue-600"
+									}`}
+									onClick={() => toggleFirstStaffOpt("showNumbered")}
+									title="简谱（数字谱）"
+								>
+									<FileText className="h-3.5 w-3.5" />
+								</button>
 							</div>
 						)}
+
+						{/* Player controls: inline buttons (Play-Pause / Stop / Scroll) */}
+						<div className="ml-2 flex items-center gap-1">
+							{/* Player enable toggle removed: controls are always enabled */}
+
+							<button
+								type="button"
+								className={`h-6 w-6 p-0.5 rounded ${isPlaying ? "bg-blue-500/20 text-blue-600" : "hover:bg-blue-500/20 hover:text-blue-600"}`}
+								onClick={() => {
+									const api = apiRef.current;
+									if (!api) return;
+									try {
+										if (!isPlaying) {
+											api.play?.();
+											setIsPlaying(true);
+										} else {
+											api.pause?.();
+											setIsPlaying(false);
+										}
+									} catch (e) {
+										console.error("Failed play/pause:", e);
+									}
+								}}
+								title={isPlaying ? "暂停" : "播放"}
+							>
+								{isPlaying ? (
+									<Pause className="h-4 w-4" />
+								) : (
+									<Play className="h-4 w-4" />
+								)}
+							</button>
+
+							<button
+								type="button"
+								className={`h-6 w-6 p-0.5 rounded hover:bg-blue-500/20 hover:text-blue-600`}
+								onClick={() => {
+									const api = apiRef.current;
+									if (!api) return;
+									try {
+										api.stop?.();
+										setIsPlaying(false);
+									} catch (e) {
+										console.error("Failed stop:", e);
+									}
+								}}
+								title="停止"
+							>
+								<Square className="h-4 w-4" />
+							</button>
+
+							<button
+								type="button"
+								className={`h-6 w-6 p-0.5 rounded ${
+									scrollMode === alphaTab.ScrollMode.Continuous
+										? "bg-blue-500/20 text-blue-600"
+										: "hover:bg-blue-500/20 hover:text-blue-600"
+								}`}
+								onClick={() => {
+									const api = apiRef.current;
+									if (!api || !api.settings) return;
+									try {
+										const newMode =
+											scrollMode === alphaTab.ScrollMode.Continuous
+												? alphaTab.ScrollMode.OffScreen
+												: alphaTab.ScrollMode.Continuous;
+										setScrollMode(newMode);
+										(
+											api.settings.player as alphaTab.PlayerSettings
+										).scrollMode = newMode;
+										api.updateSettings?.();
+									} catch (error) {
+										console.error("Failed to toggle scroll mode:", error);
+									}
+								}}
+								title={`滚动模式：${
+									scrollMode === alphaTab.ScrollMode.Continuous
+										? "连续滚动"
+										: "超出页面后滚动"
+								}`}
+							>
+								<Waves className="h-4 w-4" />
+							</button>
+						</div>
+						{/* Zoom controls: - button, percentage input, + button */}
+						<div className="ml-2 flex items-center gap-1">
+							<button
+								type="button"
+								className={`h-6 w-6 p-0.5 rounded hover:bg-blue-500/20 hover:text-blue-600`}
+								onClick={() => applyZoom(zoomPercent - 10)}
+								title="缩小"
+							>
+								<Minus className="h-4 w-4" />
+							</button>
+
+							<input
+								aria-label="缩放百分比"
+								value={zoomPercent}
+								onChange={(e) => {
+									const v = parseInt(e.target.value ?? "60", 10);
+									if (Number.isNaN(v)) return;
+									applyZoom(v);
+								}}
+								onBlur={(e) => {
+									const v = parseInt(e.target.value ?? "60", 10);
+									if (Number.isNaN(v)) return;
+									applyZoom(v);
+								}}
+								className="w-16 h-6 text-xs text-center rounded bg-transparent border border-border px-1 input-no-spinner"
+								step={1}
+								min={10}
+								max={400}
+								onKeyDown={(e) => {
+									if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+										e.preventDefault();
+									}
+								}}
+								onWheel={(e) => {
+									e.preventDefault();
+								}}
+								type="number"
+							/>
+							<span className="text-xs">%</span>
+
+							<button
+								type="button"
+								className={`h-6 w-6 p-0.5 rounded hover:bg-blue-500/20 hover:text-blue-600`}
+								onClick={() => applyZoom(zoomPercent + 10)}
+								title="放大"
+							>
+								<Plus className="h-4 w-4" />
+							</button>
+						</div>
+
+						{/* 打印按钮 */}
+						<div className="ml-2 flex items-center gap-1">
+							<button
+								type="button"
+								className="h-6 w-6 p-0.5 rounded hover:bg-blue-500/20 hover:text-blue-600"
+								onClick={() => setShowPrintPreview(true)}
+								title="打印预览"
+								disabled={!content}
+							>
+								<Printer className="h-4 w-4" />
+							</button>
+						</div>
 					</div>
-					<button
-						type="button"
-						onClick={() => setParseError(null)}
-						className="shrink-0 text-destructive/60 hover:text-destructive text-lg leading-none"
-						title="关闭错误提示"
-					>
-						×
-					</button>
-				</div>
+					<div className="flex-1 overflow-auto relative h-full">
+						<div ref={containerRef} className="w-full h-full" />
+						<div
+							ref={cursorRef}
+							className="pointer-events-none absolute z-20 bg-amber-300/40 rounded-sm"
+							style={{ display: "none" }}
+						/>
+					</div>
+					{parseError && (
+						<div className="bg-destructive/10 text-destructive px-3 py-2 text-xs border-t border-destructive/20 flex items-start gap-2">
+							<span className="font-semibold shrink-0">⚠️</span>
+							<div className="flex-1 min-w-0">
+								<div className="font-medium">AlphaTex 解析错误</div>
+								<div className="mt-0.5 text-destructive/80 break-words">
+									{parseError}
+								</div>
+								{restorePerformed && lastValidScoreRef.current && (
+									<div className="mt-1 text-destructive/60 text-[11px]">
+										已恢复到上一次成功的乐谱
+									</div>
+								)}
+							</div>
+							<button
+								type="button"
+								onClick={() => setParseError(null)}
+								className="shrink-0 text-destructive/60 hover:text-destructive text-lg leading-none"
+								title="关闭错误提示"
+							>
+								×
+							</button>
+						</div>
+					)}
+				</>
+			)}
+
+			{/* 打印预览模态窗口 */}
+			{showPrintPreview && content && (
+				<PrintPreview
+					content={content}
+					fileName={fileName}
+					onClose={() => setShowPrintPreview(false)}
+				/>
 			)}
 		</div>
 	);
