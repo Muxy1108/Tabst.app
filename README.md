@@ -54,7 +54,7 @@ MCP Server
 - [context7](https://context7.com/)
 - [shadcn/ui](https://ui.shadcn.com/)
 
-## Installation
+## Install Deps
 
 ```powershell
 pnpm install
