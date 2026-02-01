@@ -4,7 +4,14 @@ import { Compartment, EditorState } from "@codemirror/state";
 import type { ViewUpdate } from "@codemirror/view";
 import { basicSetup, EditorView } from "codemirror";
 import { ChevronRight, Edit } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
+import { useTranslation } from "react-i18next";
 import { alphatexAbbreviations } from "../lib/alphatex-abbreviations";
 import { createAlphaTexBarlinesExtension } from "../lib/alphatex-barlines";
 import { createAlphaTexAutocomplete } from "../lib/alphatex-completion";
@@ -22,9 +29,16 @@ import { whitespaceDecoration } from "../lib/whitespace-decoration";
 import type { EditorCursorInfo } from "../store/appStore";
 import { useAppStore } from "../store/appStore";
 import Preview from "./Preview";
+import QuoteCard from "./QuoteCard";
 import TopBar from "./TopBar";
 import { Button } from "./ui/button";
 import IconButton from "./ui/icon-button";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "./ui/tooltip";
 
 interface EditorProps {
 	showExpandSidebar?: boolean;
@@ -32,11 +46,13 @@ interface EditorProps {
 }
 
 export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
+	const { t } = useTranslation(["sidebar", "common"]);
 	const editorRef = useRef<HTMLDivElement | null>(null);
 	const viewRef = useRef<EditorView | null>(null);
 	const saveTimerRef = useRef<number | null>(null);
 	const lspClientRef = useRef<AlphaTexLSPClient | null>(null);
 	const lastContentRef = useRef<string>("");
+	const focusCleanupRef = useRef<(() => void) | null>(null);
 
 	// Track current file path to detect language changes
 	const currentFilePathRef = useRef<string>("");
@@ -264,6 +280,23 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 				viewRef.current.destroy();
 				viewRef.current = null;
 			}
+			// Clear any残留的 DOM 元素 - 使用 requestAnimationFrame 确保在下一帧清理
+			if (editorRef.current) {
+				// 立即清空，确保 DOM 被清理
+				const container = editorRef.current;
+				// 查找并移除所有 CodeMirror 相关的 DOM 元素
+				const cmEditor = container.querySelector(".cm-editor");
+				if (cmEditor) {
+					cmEditor.remove();
+				}
+				// 也清空 innerHTML 作为备用
+				container.innerHTML = "";
+			}
+			if (focusCleanupRef.current) {
+				focusCleanupRef.current();
+				focusCleanupRef.current = null;
+				useAppStore.getState().setEditorHasFocus(false);
+			}
 			if (lspClientRef.current) {
 				lspClientRef.current.close?.();
 				lspClientRef.current = null;
@@ -291,6 +324,10 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 						viewRef.current.destroy();
 						viewRef.current = null;
 					}
+					// Clear any残留的 DOM 元素
+					if (editorRef.current) {
+						editorRef.current.innerHTML = "";
+					}
 
 					const themeExtension = createThemeExtension(isDark);
 					const languageExtensions = await loadLanguageExtensions(
@@ -317,6 +354,21 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 							state,
 							parent: editorRef.current,
 						});
+						if (focusCleanupRef.current) {
+							focusCleanupRef.current();
+							focusCleanupRef.current = null;
+						}
+						const dom = viewRef.current.dom;
+						const handleFocusIn = () =>
+							useAppStore.getState().setEditorHasFocus(true);
+						const handleFocusOut = () =>
+							useAppStore.getState().setEditorHasFocus(false);
+						dom.addEventListener("focusin", handleFocusIn);
+						dom.addEventListener("focusout", handleFocusOut);
+						focusCleanupRef.current = () => {
+							dom.removeEventListener("focusin", handleFocusIn);
+							dom.removeEventListener("focusout", handleFocusOut);
+						};
 						currentFilePathRef.current = filePath;
 						lastContentRef.current = content;
 					}
@@ -457,6 +509,15 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 				viewRef.current.destroy();
 				viewRef.current = null;
 			}
+			// Clear any残留的 DOM 元素
+			if (editorRef.current) {
+				editorRef.current.innerHTML = "";
+			}
+			if (focusCleanupRef.current) {
+				focusCleanupRef.current();
+				focusCleanupRef.current = null;
+				useAppStore.getState().setEditorHasFocus(false);
+			}
 			if (lspClientRef.current) {
 				lspClientRef.current.close?.();
 				lspClientRef.current = null;
@@ -468,12 +529,64 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 		};
 	}, []);
 
+	// Cleanup editor when no active file - use useLayoutEffect to ensure cleanup before render
+	useLayoutEffect(() => {
+		if (!activeFileId || !activeFile) {
+			// 先保存编辑器 DOM 引用，因为 destroy() 会清除它
+			const editorDom = viewRef.current?.dom
+				? viewRef.current.dom.closest(".cm-editor")
+				: null;
+
+			if (viewRef.current) {
+				viewRef.current.destroy();
+				viewRef.current = null;
+			}
+
+			// Clear any残留的 DOM 元素
+			if (editorRef.current) {
+				// 查找并移除所有 CodeMirror 相关的 DOM 元素
+				const cmEditor = editorRef.current.querySelector(".cm-editor");
+				if (cmEditor) {
+					cmEditor.remove();
+				}
+				// 也清空 innerHTML 作为备用
+				editorRef.current.innerHTML = "";
+			}
+
+			// 额外检查：如果编辑器 DOM 被挂载到了其他地方，也清理它
+			// 这可能是由于 React 的 ref 更新时机问题导致的
+			if (editorDom?.parentElement) {
+				editorDom.remove();
+			}
+
+			// 最后检查：在整个组件树中查找并清理任何残留的编辑器 DOM
+			// 这可以处理编辑器被意外挂载到组件外部的情况
+			if (editorRef.current) {
+				const container = editorRef.current;
+				// 向上查找父元素，确保清理整个编辑器容器
+				let parent = container.parentElement;
+				while (parent) {
+					const cmEditorInParent = parent.querySelector(".cm-editor");
+					if (cmEditorInParent) {
+						cmEditorInParent.remove();
+					}
+					// 如果父元素本身就是编辑器容器，也清理它
+					if (parent.classList.contains("cm-editor")) {
+						parent.remove();
+						break;
+					}
+					parent = parent.parentElement;
+				}
+			}
+		}
+	}, [activeFileId, activeFile]);
+
 	if (!activeFile) {
 		return (
 			<div className="flex-1 flex items-center justify-center">
 				<div className="flex flex-col items-center gap-6">
 					<p className="text-sm text-muted-foreground">
-						选择或创建一个文件开始编辑
+						{t("common:selectOrCreateFile")}
 					</p>
 					<div className="flex flex-col gap-2 items-center">
 						{onExpandSidebar && (
@@ -483,7 +596,7 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 								className="h-7 px-2 text-muted-foreground"
 								onClick={onExpandSidebar}
 							>
-								打开侧边栏
+								{t("expandSidebar")}
 							</Button>
 						)}
 						<Button
@@ -492,7 +605,7 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 							className="h-7 px-2 text-muted-foreground"
 							onClick={() => setWorkspaceMode("tutorial")}
 						>
-							打开教程
+							{t("openTutorial")}
 						</Button>
 						<Button
 							variant="ghost"
@@ -500,8 +613,12 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 							className="h-7 px-2 text-muted-foreground"
 							onClick={() => setWorkspaceMode("settings")}
 						>
-							打开设置
+							{t("openSettings")}
 						</Button>
+					</div>
+					{/* Quote card below OpenSettings button */}
+					<div className="w-full flex items-center justify-center">
+						<QuoteCard />
 					</div>
 				</div>
 			</div>
@@ -527,7 +644,7 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 										size="icon"
 										className="h-8 w-8"
 										onClick={onExpandSidebar}
-										aria-label="展开侧边栏"
+										aria-label={t("expandSidebar")}
 									>
 										<ChevronRight className="h-4 w-4" />
 									</Button>
@@ -548,29 +665,38 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 					{/* Right: Preview */}
 					<div className="w-1/2 flex flex-col bg-card min-h-0 overflow-y-auto overflow-x-hidden">
 						<Preview
-							fileName={`${activeFile.name} 预览`}
+							fileName={`${activeFile.name} ${t("common:preview")}`}
 							content={activeFile.content}
 						/>
 					</div>
 				</div>
 			) : (
-				<div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
-					<TopBar
-						leading={
-							showExpandSidebar ? (
-								<IconButton title="展开侧边栏" onClick={onExpandSidebar}>
-									<ChevronRight className="h-4 w-4" />
-								</IconButton>
-							) : undefined
-						}
-						icon={
-							<Edit className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-						}
-						title={activeFile.name}
-					/>
-					{/* Host for CodeMirror */}
-					<div ref={editorRef} className="h-full" />
-				</div>
+				<TooltipProvider delayDuration={200}>
+					<div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+						<TopBar
+							leading={
+								showExpandSidebar ? (
+									<Tooltip>
+										<TooltipTrigger asChild>
+											<IconButton onClick={onExpandSidebar}>
+												<ChevronRight className="h-4 w-4" />
+											</IconButton>
+										</TooltipTrigger>
+										<TooltipContent side="bottom">
+											<p>{t("expandSidebar")}</p>
+										</TooltipContent>
+									</Tooltip>
+								) : undefined
+							}
+							icon={
+								<Edit className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+							}
+							title={activeFile.name}
+						/>
+						{/* Host for CodeMirror */}
+						<div ref={editorRef} className="h-full" />
+					</div>
+				</TooltipProvider>
 			)}
 		</div>
 	);

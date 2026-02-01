@@ -80,8 +80,20 @@ function App() {
 						onExpandSidebar={() => setSidebarCollapsed(false)}
 					/>
 				)}
-				{workspaceMode === "tutorial" && <TutorialView />}
-				{workspaceMode === "settings" && <SettingsView />}
+				{workspaceMode === "tutorial" && (
+					<TutorialView
+						showExpandSidebar={sidebarCollapsed}
+						onExpandSidebar={() => setSidebarCollapsed(false)}
+						onCollapseSidebar={() => setSidebarCollapsed(true)}
+					/>
+				)}
+				{workspaceMode === "settings" && (
+					<SettingsView
+						showExpandSidebar={sidebarCollapsed}
+						onExpandSidebar={() => setSidebarCollapsed(false)}
+						onCollapseSidebar={() => setSidebarCollapsed(true)}
+					/>
+				)}
 
 				{/* 全局底部栏（放在主内容流中，保持与 Editor 排列，不再遮挡内容） */}
 				<GlobalBottomBar />

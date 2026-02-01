@@ -6,11 +6,15 @@ import {
 	Pause,
 	Play,
 	Plus,
+	RotateCw,
 	Square,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { getNextTutorial, getPrevTutorial } from "../lib/tutorial-loader";
 import { useAppStore } from "../store/appStore";
+import BpmStepper from "./BpmStepper";
 import StaffControls from "./StaffControls";
-import { defaultTutorials } from "./TutorialView";
+import { defaultSettingsPages } from "./settings-pages";
 import IconButton from "./ui/icon-button";
 import {
 	Select,
@@ -27,6 +31,7 @@ import {
 } from "./ui/tooltip";
 
 export default function GlobalBottomBar() {
+	const { t } = useTranslation(["toolbar", "settings", "common"]);
 	const activeFile = useAppStore((state) => state.getActiveFile());
 	const firstStaffOptions = useAppStore((state) => state.firstStaffOptions);
 	const requestStaffToggle = useAppStore((state) => state.requestStaffToggle);
@@ -39,42 +44,64 @@ export default function GlobalBottomBar() {
 	const setZoomPercent = useAppStore((s) => s.setZoomPercent);
 	const playbackSpeed = useAppStore((s) => s.playbackSpeed);
 	const setPlaybackSpeed = useAppStore((s) => s.setPlaybackSpeed);
+	const playbackBpmMode = useAppStore((s) => s.playbackBpmMode);
 	const metronomeVolume = useAppStore((s) => s.metronomeVolume);
 	const setMetronomeVolume = useAppStore((s) => s.setMetronomeVolume);
 
-	// Tutorial navigation
+	// Workspace mode
 	const workspaceMode = useAppStore((s) => s.workspaceMode);
 	const activeTutorialId = useAppStore((s) => s.activeTutorialId);
 	const setActiveTutorialId = useAppStore((s) => s.setActiveTutorialId);
+	const activeSettingsPageId = useAppStore((s) => s.activeSettingsPageId);
 	const isTutorialMode = workspaceMode === "tutorial";
+	const isSettingsMode = workspaceMode === "settings";
 
 	// Calculate previous and next tutorial
-	const currentIndex = defaultTutorials.findIndex(
-		(t) => t.id === activeTutorialId,
+	const prevTutorial = activeTutorialId
+		? getPrevTutorial(activeTutorialId)
+		: null;
+	const nextTutorial = activeTutorialId
+		? getNextTutorial(activeTutorialId)
+		: null;
+
+	// Playback speed control element (BPM mode vs Ratio mode)
+	const playbackSpeedControl = playbackBpmMode ? (
+		<BpmStepper />
+	) : (
+		<Select
+			value={String(playbackSpeed)}
+			onValueChange={(value) => {
+				const v = Number.parseFloat(value);
+				if (Number.isNaN(v)) return;
+				setPlaybackSpeed(v);
+				playerControls?.applyPlaybackSpeed?.(v);
+			}}
+		>
+			<SelectTrigger aria-label={t("toolbar:playbackSpeed")}>
+				<SelectValue />
+			</SelectTrigger>
+			<SelectContent side="top" align="end">
+				{[0.5, 0.75, 1, 1.25, 1.5, 2].map((v) => (
+					<SelectItem key={v} value={String(v)}>
+						{v}x
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
 	);
-	const prevTutorial =
-		currentIndex > 0 ? defaultTutorials[currentIndex - 1] : null;
-	const nextTutorial =
-		currentIndex >= 0 && currentIndex < defaultTutorials.length - 1
-			? defaultTutorials[currentIndex + 1]
-			: null;
 
 	return (
 		<TooltipProvider delayDuration={200}>
 			<footer className="h-9 border-t border-border bg-card flex items-center justify-between px-4 text-xs text-muted-foreground flex-shrink-0 w-full">
-				{/* Left: app status */}
 				<div className="flex items-center gap-3">
-					<span className="font-medium">Tabst</span>
+					<span className="font-medium">Tabst@JayBridge</span>
 				</div>
 
-				{/* Right: Controls area */}
 				<div className="flex items-center gap-2">
-					{/* Tutorial navigation buttons (only in tutorial mode) */}
 					{isTutorialMode && (prevTutorial || nextTutorial) && (
 						<div className="flex items-center gap-3">
-							{/* Keyboard hint */}
 							<span className="text-xs text-muted-foreground/70 hidden sm:inline">
-								使用 ← → 键翻页
+								{t("toolbar:tutorial.keyboardHint")}
 							</span>
 							<div className="flex items-center gap-2">
 								{prevTutorial && (
@@ -84,16 +111,24 @@ export default function GlobalBottomBar() {
 												type="button"
 												onClick={() => setActiveTutorialId(prevTutorial.id)}
 												className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-accent hover:text-accent-foreground transition-colors text-xs"
-												aria-label={`前一页：${prevTutorial.title}`}
+												aria-label={t("toolbar:tutorial.prevWithTitle", {
+													title: prevTutorial.title,
+												})}
 											>
 												<ChevronLeft className="h-3.5 w-3.5" />
 												<span className="text-xs">
-													前一页：{prevTutorial.title}
+													{t("toolbar:tutorial.prevWithTitle", {
+														title: prevTutorial.title,
+													})}
 												</span>
 											</button>
 										</TooltipTrigger>
 										<TooltipContent side="top">
-											<p>前一页：{prevTutorial.title} (← 键)</p>
+											<p>
+												{t("toolbar:tutorial.prevTooltip", {
+													title: prevTutorial.title,
+												})}
+											</p>
 										</TooltipContent>
 									</Tooltip>
 								)}
@@ -104,16 +139,24 @@ export default function GlobalBottomBar() {
 												type="button"
 												onClick={() => setActiveTutorialId(nextTutorial.id)}
 												className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-accent hover:text-accent-foreground transition-colors text-xs"
-												aria-label={`后一页：${nextTutorial.title}`}
+												aria-label={t("toolbar:tutorial.nextWithTitle", {
+													title: nextTutorial.title,
+												})}
 											>
 												<span className="text-xs">
-													后一页：{nextTutorial.title}
+													{t("toolbar:tutorial.nextWithTitle", {
+														title: nextTutorial.title,
+													})}
 												</span>
 												<ChevronRight className="h-3.5 w-3.5" />
 											</button>
 										</TooltipTrigger>
 										<TooltipContent side="top">
-											<p>后一页：{nextTutorial.title} (→ 键)</p>
+											<p>
+												{t("toolbar:tutorial.nextTooltip", {
+													title: nextTutorial.title,
+												})}
+											</p>
 										</TooltipContent>
 									</Tooltip>
 								)}
@@ -121,16 +164,28 @@ export default function GlobalBottomBar() {
 						</div>
 					)}
 
-					{/* Center/Right: moved controls (only for .atex files, not in tutorial mode) */}
-					{isAtexFile && !isTutorialMode && (
+					{isSettingsMode && activeSettingsPageId && (
+						<div className="flex items-center gap-2 text-xs text-muted-foreground">
+							{(() => {
+								const currentPage = defaultSettingsPages.find(
+									(p) => p.id === activeSettingsPageId,
+								);
+								return currentPage ? (
+									<span>{t(`settings:${currentPage.id}`)}</span>
+								) : (
+									<span>{t("common:settings")}</span>
+								);
+							})()}
+						</div>
+					)}
+
+					{isAtexFile && !isTutorialMode && !isSettingsMode && (
 						<div className="flex items-center gap-2">
-							{/* Existing staff controls (leftmost) */}
 							<StaffControls
 								firstStaffOptions={firstStaffOptions}
 								toggleFirstStaffOpt={requestStaffToggle}
 							/>
 
-							{/* Zoom controls (display size): shrink / input / enlarge */}
 							<div className="ml-2 flex items-center gap-1">
 								<Tooltip>
 									<TooltipTrigger asChild>
@@ -141,18 +196,18 @@ export default function GlobalBottomBar() {
 												setZoomPercent(pct);
 												playerControls?.applyZoom?.(pct);
 											}}
-											aria-label="缩小"
+											aria-label={t("toolbar:zoomOut")}
 										>
 											<Minus className="h-4 w-4" />
 										</IconButton>
 									</TooltipTrigger>
 									<TooltipContent side="top">
-										<p>缩小</p>
+										<p>{t("toolbar:zoomOut")}</p>
 									</TooltipContent>
 								</Tooltip>
 
 								<input
-									aria-label="缩放百分比"
+									aria-label={t("toolbar:zoomPercent")}
 									value={zoomPercent}
 									onChange={(e) => {
 										const v = parseInt(e.target.value ?? "60", 10);
@@ -166,7 +221,7 @@ export default function GlobalBottomBar() {
 										setZoomPercent(pct);
 										playerControls?.applyZoom?.(pct);
 									}}
-									className="w-10 h-6 text-xs text-center rounded bg-transparent border border-border px-1 input-no-spinner"
+									className="w-8 h-6 text-xs text-center rounded bg-transparent border border-border px-1 input-no-spinner"
 									step={1}
 									min={10}
 									max={400}
@@ -182,42 +237,20 @@ export default function GlobalBottomBar() {
 												setZoomPercent(pct);
 												playerControls?.applyZoom?.(pct);
 											}}
-											aria-label="放大"
+											aria-label={t("toolbar:zoomIn")}
 										>
 											<Plus className="h-4 w-4" />
 										</IconButton>
 									</TooltipTrigger>
 									<TooltipContent side="top">
-										<p>放大</p>
+										<p>{t("toolbar:zoomIn")}</p>
 									</TooltipContent>
 								</Tooltip>
 							</div>
 
-							{/* Playback speed */}
 							<div className="ml-3 flex items-center gap-1 text-xs">
-								<Select
-									value={String(playbackSpeed)}
-									onValueChange={(value) => {
-										const v = Number.parseFloat(value);
-										if (Number.isNaN(v)) return;
-										setPlaybackSpeed(v);
-										playerControls?.applyPlaybackSpeed?.(v);
-									}}
-								>
-									<SelectTrigger aria-label="播放速度">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent side="top" align="end">
-										{[0.5, 0.75, 1, 1.25, 1.5, 2].map((v) => (
-											<SelectItem key={v} value={String(v)}>
-												{v}x
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
+								{playbackSpeedControl}
 							</div>
-
-							{/* Metronome toggle */}
 							<div className="ml-2 flex items-center">
 								<Tooltip>
 									<TooltipTrigger asChild>
@@ -228,18 +261,21 @@ export default function GlobalBottomBar() {
 												setMetronomeVolume(nextVolume);
 												playerControls?.setMetronomeVolume?.(nextVolume);
 											}}
-											aria-label="节拍器"
+											aria-label={t("toolbar:metronome.label")}
 										>
 											<Music2 className="h-4 w-4" />
 										</IconButton>
 									</TooltipTrigger>
 									<TooltipContent side="top">
-										<p>{metronomeVolume > 0 ? "关闭节拍器" : "开启节拍器"}</p>
+										<p>
+											{metronomeVolume > 0
+												? t("toolbar:metronome.disable")
+												: t("toolbar:metronome.enable")}
+										</p>
 									</TooltipContent>
 								</Tooltip>
 							</div>
 
-							{/* Playback controls (play/pause, stop) - right side */}
 							<Tooltip>
 								<TooltipTrigger asChild>
 									<IconButton
@@ -253,7 +289,7 @@ export default function GlobalBottomBar() {
 												console.error("GlobalBottomBar play/pause failed:", e);
 											}
 										}}
-										aria-label="播放/暂停"
+										aria-label={`${t("toolbar:play")}/${t("toolbar:pause")}`}
 									>
 										{playerIsPlaying ? (
 											<Pause className="h-4 w-4" />
@@ -263,7 +299,9 @@ export default function GlobalBottomBar() {
 									</IconButton>
 								</TooltipTrigger>
 								<TooltipContent side="top">
-									<p>{playerIsPlaying ? "暂停" : "播放"}</p>
+									<p>
+										{playerIsPlaying ? t("toolbar:pause") : t("toolbar:play")}
+									</p>
 								</TooltipContent>
 							</Tooltip>
 
@@ -278,13 +316,34 @@ export default function GlobalBottomBar() {
 												console.error("GlobalBottomBar stop failed:", e);
 											}
 										}}
-										aria-label="停止"
+										aria-label={t("toolbar:stop")}
 									>
 										<Square className="h-4 w-4" />
 									</IconButton>
 								</TooltipTrigger>
 								<TooltipContent side="top">
-									<p>停止</p>
+									<p>{t("toolbar:stop")}</p>
+								</TooltipContent>
+							</Tooltip>
+
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<IconButton
+										onClick={() => {
+											if (!playerControls) return;
+											try {
+												playerControls.refresh?.();
+											} catch (e) {
+												console.error("GlobalBottomBar refresh failed:", e);
+											}
+										}}
+										aria-label={t("toolbar:refresh")}
+									>
+										<RotateCw className="h-4 w-4" />
+									</IconButton>
+								</TooltipTrigger>
+								<TooltipContent side="top">
+									<p>{t("toolbar:refresh")}</p>
 								</TooltipContent>
 							</Tooltip>
 						</div>
