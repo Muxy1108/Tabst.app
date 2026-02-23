@@ -1,450 +1,640 @@
-import {
-	ChevronLeft,
-	Edit,
-	FileDown,
-	FileMusic,
-	FileQuestion,
-	FileText,
-	FolderOpen,
-	Moon,
-	Settings,
-	Sun,
-} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { type FileItem, useAppStore } from "../store/appStore";
+import { useFileOperations } from "../hooks/useFileOperations";
+import { useTheme } from "../lib/theme-system/use-theme";
+import { useAppStore } from "../store/appStore";
+import type { DeleteBehavior, FileNode } from "../types/repo";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { FileTree } from "./FileTree";
 import { SettingsSidebar } from "./SettingsSidebar";
+import { SidebarBottomBar, SidebarCommands } from "./SidebarCommands";
 import { TutorialsSidebar } from "./TutorialsSidebar";
-import { Button } from "./ui/button";
-import IconButton from "./ui/icon-button";
 import { ScrollArea } from "./ui/scroll-area";
-// Separator import removed - toolbar now includes border
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipProvider,
-	TooltipTrigger,
-} from "./ui/tooltip";
+import { TooltipProvider } from "./ui/tooltip";
 
 export interface SidebarProps {
 	onCollapse?: () => void;
 }
 
-// 支持的文件扩展名
-const ALLOWED_EXTENSIONS = [".md", ".atex"];
-
 export function Sidebar({ onCollapse }: SidebarProps) {
 	const { t } = useTranslation("sidebar");
-	const files = useAppStore((s) => s.files);
-	const activeFileId = useAppStore((s) => s.activeFileId);
-	const addFile = useAppStore((s) => s.addFile);
-	// keep removeFile in app state if other components later use it
-	const _renameFile = useAppStore((s) => s.renameFile);
-	const setActiveFile = useAppStore((s) => s.setActiveFile);
-
-	// 打开文件浏览器
-	const handleOpenFile = async () => {
-		try {
-			const result = await window.electronAPI.openFile(ALLOWED_EXTENSIONS);
-			if (result) {
-				const file: FileItem = {
-					id: crypto.randomUUID(),
-					name: result.name,
-					path: result.path,
-					content: result.content,
-				};
-				addFile(file);
-			}
-		} catch (error) {
-			console.error("打开文件失败:", error);
-		}
-	};
-
-	// 新建不同类型的文件 (.atex / .md)
-	const handleNewFileWithExt = async (ext: string) => {
-		try {
-			const result = await window.electronAPI.createFile(ext);
-			if (result) {
-				const file: FileItem = {
-					id: crypto.randomUUID(),
-					name: result.name,
-					path: result.path,
-					content: result.content,
-				};
-				addFile(file);
-			}
-		} catch (error) {
-			console.error("创建文件失败:", error);
-		}
-	};
-
-	// 重命名文件（在列表中，更新文件名）
-	const [editingId, setEditingId] = useState<string | null>(null);
-	const [renameValue, setRenameValue] = useState<string>("");
-	const [renameExt, setRenameExt] = useState<string>("");
-	const inputRef = useRef<HTMLInputElement | null>(null);
+	const fileTree = useAppStore((s) => s.fileTree);
+	const activeRepoId = useAppStore((s) => s.activeRepoId);
 	const workspaceMode = useAppStore((s) => s.workspaceMode);
+	const setActiveFile = useAppStore((s) => s.setActiveFile);
 	const setWorkspaceMode = useAppStore((s) => s.setWorkspaceMode);
-	const setActiveTutorialId = useAppStore((s) => s.setActiveTutorialId);
+	const expandFolder = useAppStore((s) => s.expandFolder);
+	const collapseFolder = useAppStore((s) => s.collapseFolder);
+	const refreshFileTree = useAppStore((s) => s.refreshFileTree);
+	const addFile = useAppStore((s) => s.addFile);
+	const renameFile = useAppStore((s) => s.renameFile);
+	const removeFile = useAppStore((s) => s.removeFile);
+	const deleteBehavior = useAppStore((s) => s.deleteBehavior);
 
-	const splitName = (name: string) => {
-		const idx = name.lastIndexOf(".");
-		if (idx > 0) return { base: name.slice(0, idx), ext: name.slice(idx + 1) };
-		return { base: name, ext: "" };
-	};
+	const { themeMode, setThemeMode } = useTheme();
+	const { handleOpenFile, handleNewFile, handleNewFolder } =
+		useFileOperations();
 
-	const handleRenameClick = (e: React.MouseEvent, f: FileItem) => {
-		e.stopPropagation();
-		setEditingId(f.id);
-		const { base, ext } = splitName(f.name);
-		setRenameValue(base);
-		setRenameExt(ext);
-		// focus will be done after render
-	};
-
-	const handleRenameCancel = (e?: React.KeyboardEvent | React.FocusEvent) => {
-		if (e && "key" in e && e.key === "Escape") {
-			// stop propagation if key event
-			e.stopPropagation();
-		}
-		setEditingId(null);
-		setRenameValue("");
-		setRenameExt("");
-	};
-
-	const handleRenameSubmit = async (id: string) => {
-		if (!renameValue?.trim()) return handleRenameCancel();
-		// only replace base name, keep original extension
-		const finalName = renameExt
-			? `${renameValue.trim()}.${renameExt}`
-			: `${renameValue.trim()}`;
-		if (!finalName) return;
-		const ok = await useAppStore.getState().renameFile(id, finalName);
-		if (!ok) {
-			console.error("failed to rename file");
-			return; // keep editing
-		}
-		setEditingId(null);
-		setRenameExt("");
-	};
+	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+	const [pendingDeleteNode, setPendingDeleteNode] = useState<FileNode | null>(
+		null,
+	);
+	const [sidebarToast, setSidebarToast] = useState<string | null>(null);
+	const [createTargetDir, setCreateTargetDir] = useState<string | undefined>(
+		undefined,
+	);
+	const [pendingRenamePath, setPendingRenamePath] = useState<string | null>(
+		null,
+	);
+	const toastTimerRef = useRef<number | null>(null);
+	const backgroundRefreshTimerRef = useRef<number | null>(null);
 
 	useEffect(() => {
-		if (editingId && inputRef.current) {
-			inputRef.current.focus();
-			inputRef.current.select();
-		}
-	}, [editingId]);
+		return () => {
+			if (toastTimerRef.current) {
+				window.clearTimeout(toastTimerRef.current);
+			}
+			if (backgroundRefreshTimerRef.current) {
+				window.clearTimeout(backgroundRefreshTimerRef.current);
+			}
+		};
+	}, []);
 
-	// 明暗色切换：通过切换 html 上的 class 属性实现
 	const handleToggleTheme = () => {
-		const root = document.documentElement;
-		root.classList.toggle("dark");
-		const isDark = root.classList.contains("dark");
-		try {
-			localStorage.setItem("theme", isDark ? "dark" : "light");
-		} catch {
-			// ignore storage errors in sandboxed environments
+		const modes = ["light", "dark", "system"] as const;
+		const currentIndex = modes.indexOf(themeMode);
+		const nextMode = modes[(currentIndex + 1) % modes.length];
+		setThemeMode(nextMode);
+	};
+
+	const showSidebarToast = (message: string) => {
+		if (toastTimerRef.current) {
+			window.clearTimeout(toastTimerRef.current);
+		}
+		setSidebarToast(message);
+		toastTimerRef.current = window.setTimeout(() => {
+			setSidebarToast(null);
+			toastTimerRef.current = null;
+		}, 2400);
+	};
+
+	const getFailureReason = (reason?: string) =>
+		reason && reason.trim().length > 0 ? reason : "unknown";
+
+	const replacePathPrefix = (
+		value: string,
+		oldPrefix: string,
+		newPrefix: string,
+	): string => {
+		if (value === oldPrefix) return newPrefix;
+		if (!value.startsWith(oldPrefix)) return value;
+		const rest = value.slice(oldPrefix.length);
+		if (rest === "" || rest.startsWith("/") || rest.startsWith("\\")) {
+			return `${newPrefix}${rest}`;
+		}
+		return value;
+	};
+
+	const syncOpenedFilesAfterMove = (fromPath: string, toPath: string) => {
+		useAppStore.setState((state) => {
+			const updatedFiles = state.files.map((file) => {
+				const nextPath = replacePathPrefix(file.path, fromPath, toPath);
+				if (nextPath === file.path) return file;
+				const nextName = nextPath.split(/[\\/]/).pop() ?? file.name;
+				return {
+					...file,
+					id: replacePathPrefix(file.id, fromPath, toPath),
+					path: nextPath,
+					name: nextName,
+				};
+			});
+
+			const nextActiveFileId = state.activeFileId
+				? replacePathPrefix(state.activeFileId, fromPath, toPath)
+				: null;
+
+			return {
+				files: updatedFiles,
+				activeFileId: nextActiveFileId,
+			};
+		});
+	};
+
+	const sortTreeNodes = (nodes: FileNode[]) => {
+		nodes.sort((a, b) => {
+			if (a.type === "folder" && b.type !== "folder") return -1;
+			if (a.type !== "folder" && b.type === "folder") return 1;
+			return a.name.localeCompare(b.name);
+		});
+	};
+
+	const addNodeToTree = (
+		nodes: FileNode[],
+		targetDirPath: string,
+		nodeToAdd: FileNode,
+	): FileNode[] => {
+		const walk = (items: FileNode[]): FileNode[] => {
+			let changed = false;
+			const next = items.map((item) => {
+				if (item.type === "folder") {
+					if (item.path === targetDirPath) {
+						const children = [...(item.children ?? [])];
+						if (!children.some((c) => c.path === nodeToAdd.path)) {
+							children.push(nodeToAdd);
+							sortTreeNodes(children);
+						}
+						changed = true;
+						return { ...item, children, isExpanded: true };
+					}
+					if (item.children) {
+						const updatedChildren = walk(item.children);
+						if (updatedChildren !== item.children) {
+							changed = true;
+							return { ...item, children: updatedChildren };
+						}
+					}
+				}
+				return item;
+			});
+
+			return changed ? next : items;
+		};
+
+		return walk(nodes);
+	};
+
+	const removeNodeFromTree = (
+		nodes: FileNode[],
+		targetPath: string,
+	): { tree: FileNode[]; removed: FileNode | null } => {
+		let removed: FileNode | null = null;
+		const walk = (items: FileNode[]): FileNode[] => {
+			let changed = false;
+			const filtered: FileNode[] = [];
+			for (const item of items) {
+				if (item.path === targetPath) {
+					removed = item;
+					changed = true;
+					continue;
+				}
+				if (item.type === "folder" && item.children) {
+					const nextChildren = walk(item.children);
+					if (nextChildren !== item.children) {
+						changed = true;
+						filtered.push({ ...item, children: nextChildren });
+						continue;
+					}
+				}
+				filtered.push(item);
+			}
+			return changed ? filtered : items;
+		};
+
+		return { tree: walk(nodes), removed };
+	};
+
+	const remapNodePath = (
+		node: FileNode,
+		oldPrefix: string,
+		newPrefix: string,
+	): FileNode => {
+		const mappedPath = replacePathPrefix(node.path, oldPrefix, newPrefix);
+		const mappedId = replacePathPrefix(node.id, oldPrefix, newPrefix);
+		const mappedName = mappedPath.split(/[\\/]/).pop() ?? node.name;
+		if (node.type === "folder" && node.children) {
+			return {
+				...node,
+				id: mappedId,
+				path: mappedPath,
+				name: mappedName,
+				children: node.children.map((child) =>
+					remapNodePath(child, oldPrefix, newPrefix),
+				),
+			};
+		}
+		return {
+			...node,
+			id: mappedId,
+			path: mappedPath,
+			name: mappedName,
+		};
+	};
+
+	const scheduleBackgroundRefresh = () => {
+		if (backgroundRefreshTimerRef.current) {
+			window.clearTimeout(backgroundRefreshTimerRef.current);
+		}
+		backgroundRefreshTimerRef.current = window.setTimeout(() => {
+			void refreshFileTree();
+			backgroundRefreshTimerRef.current = null;
+		}, 180);
+	};
+
+	const normalizePath = (p: string) => p.replace(/\\/g, "/");
+	const getParentDirectory = (p: string): string | undefined => {
+		const normalized = normalizePath(p);
+		const idx = normalized.lastIndexOf("/");
+		if (idx <= 0) return undefined;
+		return normalized.slice(0, idx);
+	};
+
+	const closeOpenedFilesForDeletedNode = (node: FileNode) => {
+		const state = useAppStore.getState();
+		const nodePath = normalizePath(node.path).replace(/\/+$/, "");
+
+		const shouldRemove = (filePath: string) => {
+			const p = normalizePath(filePath);
+			if (node.type === "file") return p === nodePath;
+			return p === nodePath || p.startsWith(`${nodePath}/`);
+		};
+
+		const opened = state.files.filter((f) => shouldRemove(f.path));
+		for (const file of opened) {
+			removeFile(file.id);
+		}
+
+		if (state.activeFileId) {
+			const active = state.files.find((f) => f.id === state.activeFileId);
+			if (active && shouldRemove(active.path)) {
+				setActiveFile(null);
+			}
 		}
 	};
 
-	// 打开应用设置（如果主进程提供接口则调用）
-	const handleOpenSettings = () => {
-		// Toggle settings workspace view; call main openSettings when activating
-		try {
-			const newMode = workspaceMode === "settings" ? "editor" : "settings";
-			setWorkspaceMode(newMode);
-			const api = (
-				window as unknown as { electronAPI?: { openSettings?: () => void } }
-			).electronAPI;
-			if (newMode === "settings" && api?.openSettings) {
-				api.openSettings();
-			}
-		} catch (err) {
-			console.error("Failed to open settings:", err);
+	const executeDelete = async (node: FileNode, behavior: DeleteBehavior) => {
+		if (behavior === "ask-every-time") {
+			return;
 		}
+
+		const state = useAppStore.getState();
+		const activeRepo = state.repos.find((r) => r.id === state.activeRepoId);
+		const repoPath = behavior === "repo-trash" ? activeRepo?.path : undefined;
+
+		try {
+			const result = await window.electronAPI.deleteFile(
+				node.path,
+				behavior,
+				repoPath,
+			);
+			if (!result?.success) {
+				const reason = getFailureReason(result?.error);
+				console.error("Delete failed:", reason);
+				showSidebarToast(t("deleteFailed", { name: node.name, reason }));
+				return;
+			}
+
+			closeOpenedFilesForDeletedNode(node);
+			await refreshFileTree();
+		} catch (err) {
+			const reason =
+				err instanceof Error ? err.message : getFailureReason(String(err));
+			console.error("Delete error:", err);
+			showSidebarToast(t("deleteFailed", { name: node.name, reason }));
+		}
+	};
+
+	const handleFileSelect = async (node: FileNode) => {
+		if (node.type === "file") {
+			setCreateTargetDir(getParentDirectory(node.path));
+			const currentFiles = useAppStore.getState().files;
+			const normalizedNodePath = normalizePath(node.path);
+			const existingFile = currentFiles.find(
+				(f) => normalizePath(f.path) === normalizedNodePath,
+			);
+			const currentActiveId = useAppStore.getState().activeFileId;
+			const targetId = existingFile?.id ?? node.id;
+			const isCurrentlyActive = currentActiveId === targetId;
+
+			if (isCurrentlyActive) {
+				setActiveFile(null);
+			} else {
+				try {
+					// If this file came from a directory scan, it's likely a placeholder with empty content.
+					// Hydrate from disk on first open to avoid Editor/Preview rendering blank.
+					const shouldHydrate = !existingFile?.contentLoaded;
+					let content = existingFile?.content ?? "";
+					let contentLoaded = existingFile?.contentLoaded ?? false;
+
+					if (shouldHydrate) {
+						const result = await window.electronAPI.readFile(node.path);
+						if (result.error) {
+							console.error("[Sidebar] readFile error:", result.error);
+							return;
+						}
+						content = result.content;
+						contentLoaded = true;
+					}
+
+					addFile({
+						id: targetId,
+						name: node.name,
+						path: node.path,
+						content,
+						contentLoaded,
+					});
+					setActiveFile(targetId);
+					setWorkspaceMode("editor");
+				} catch (error) {
+					console.error("[Sidebar] Failed to read file:", error);
+				}
+			}
+		}
+	};
+
+	const handleFolderToggle = (node: FileNode) => {
+		if (node.type === "folder") {
+			setCreateTargetDir(node.path);
+			if (node.isExpanded) {
+				collapseFolder(node.path);
+			} else {
+				expandFolder(node.path);
+			}
+		}
+	};
+
+	const handleReveal = async (node: FileNode) => {
+		try {
+			await window.electronAPI.revealInFolder(node.path);
+		} catch (err) {
+			console.error("revealInFolder failed:", err);
+		}
+	};
+
+	const handleCopyPath = (node: FileNode) => {
+		navigator.clipboard.writeText(node.path).catch((err) => {
+			console.error("Failed to copy path:", err);
+		});
+	};
+
+	const handleDelete = async (node: FileNode) => {
+		if (deleteBehavior === "ask-every-time") {
+			setPendingDeleteNode(node);
+			setDeleteDialogOpen(true);
+			return;
+		}
+		await executeDelete(node, deleteBehavior);
+	};
+
+	const handleDeleteConfirm = async (behavior: DeleteBehavior) => {
+		const target = pendingDeleteNode;
+		setDeleteDialogOpen(false);
+		setPendingDeleteNode(null);
+
+		if (!target || behavior === "ask-every-time") {
+			return;
+		}
+
+		await executeDelete(target, behavior);
+	};
+
+	const handleRename = async (node: FileNode, newName: string) => {
+		if (!newName.trim()) return;
+
+		try {
+			if (node.type === "file") {
+				const ok = await renameFile(node.id, newName.trim());
+				if (!ok) {
+					showSidebarToast(
+						t("renameFailed", {
+							name: node.name,
+							reason: "unknown",
+						}),
+					);
+				}
+				return;
+			}
+
+			// Folder rename is not represented in `files`, so do it via IPC then rescan.
+			const result = await window.electronAPI?.renameFile?.(
+				node.path,
+				newName.trim(),
+			);
+			if (!result?.success) {
+				const reason = getFailureReason(result?.error);
+				console.error("rename folder failed:", reason);
+				showSidebarToast(t("renameFailed", { name: node.name, reason }));
+				return;
+			}
+			await refreshFileTree();
+		} catch (err) {
+			const reason =
+				err instanceof Error ? err.message : getFailureReason(String(err));
+			console.error("rename failed:", err);
+			showSidebarToast(t("renameFailed", { name: node.name, reason }));
+		}
+	};
+
+	const handleMove = async (sourceNode: FileNode, targetFolder: FileNode) => {
+		if (targetFolder.type !== "folder") return;
+
+		try {
+			const result = await window.electronAPI.movePath(
+				sourceNode.path,
+				targetFolder.path,
+			);
+			if (!result?.success || !result.newPath) {
+				const reason = getFailureReason(result?.error);
+				showSidebarToast(t("moveFailed", { name: sourceNode.name, reason }));
+				return;
+			}
+			const newPath = result.newPath;
+
+			syncOpenedFilesAfterMove(sourceNode.path, newPath);
+			useAppStore.setState((state) => {
+				const { tree, removed } = removeNodeFromTree(
+					state.fileTree,
+					sourceNode.path,
+				);
+				if (!removed) return {};
+				const remapped = remapNodePath(removed, sourceNode.path, newPath);
+				const nextTree = addNodeToTree(tree, targetFolder.path, remapped);
+				return { fileTree: nextTree };
+			});
+			scheduleBackgroundRefresh();
+		} catch (err) {
+			const reason =
+				err instanceof Error ? err.message : getFailureReason(String(err));
+			showSidebarToast(t("moveFailed", { name: sourceNode.name, reason }));
+		}
+	};
+
+	const renderContent = () => {
+		if (workspaceMode === "tutorial") {
+			return <TutorialsSidebar />;
+		}
+
+		if (workspaceMode === "settings") {
+			return <SettingsSidebar />;
+		}
+
+		if (!activeRepoId) {
+			return (
+				<div className="p-3 text-xs text-muted-foreground text-center">
+					{t("noRepoSelected")}
+				</div>
+			);
+		}
+
+		if (fileTree.length === 0) {
+			return (
+				<div className="p-3 text-xs text-muted-foreground text-center">
+					{t("noFiles")}
+				</div>
+			);
+		}
+
+		return (
+			<FileTree
+				nodes={fileTree}
+				pendingRenamePath={pendingRenamePath}
+				onPendingRenameConsumed={() => setPendingRenamePath(null)}
+				onFileSelect={handleFileSelect}
+				onFolderToggle={handleFolderToggle}
+				onRename={handleRename}
+				onMove={handleMove}
+				onReveal={handleReveal}
+				onCopyPath={handleCopyPath}
+				onDelete={handleDelete}
+				onCreateFileInFolder={(folder, ext) => {
+					setCreateTargetDir(folder.path);
+					void (async () => {
+						const createdPath = await handleNewFile(ext ?? ".md", folder.path);
+						if (!createdPath) return;
+						const name = createdPath.split(/[\\/]/).pop() ?? createdPath;
+						const newNode: FileNode = {
+							id: createdPath,
+							name,
+							path: createdPath,
+							type: "file",
+						};
+						useAppStore.setState((state) => ({
+							fileTree: addNodeToTree(state.fileTree, folder.path, newNode),
+						}));
+						setPendingRenamePath(createdPath);
+						scheduleBackgroundRefresh();
+					})();
+				}}
+				onCreateFolderInFolder={(folder) => {
+					setCreateTargetDir(folder.path);
+					void (async () => {
+						const createdPath = await handleNewFolder(folder.path);
+						if (!createdPath) return;
+						const name = createdPath.split(/[\\/]/).pop() ?? createdPath;
+						const newNode: FileNode = {
+							id: createdPath,
+							name,
+							path: createdPath,
+							type: "folder",
+							children: [],
+							isExpanded: true,
+						};
+						useAppStore.setState((state) => ({
+							fileTree: addNodeToTree(state.fileTree, folder.path, newNode),
+						}));
+						setPendingRenamePath(createdPath);
+						scheduleBackgroundRefresh();
+					})();
+				}}
+			/>
+		);
 	};
 
 	return (
 		<TooltipProvider delayDuration={200}>
 			<div className="w-60 max-w-[15rem] h-full border-r border-border flex flex-col bg-card box-border overflow-x-hidden shrink-0">
-				{/* 操作按钮 */}
-				<div className="h-9 px-3 flex items-center gap-1 border-b border-border bg-muted/40 shrink-0">
-					{onCollapse && (
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									variant="ghost"
-									size="icon"
-									className="h-8 w-8 hover:bg-blue-500/20 hover:text-blue-600"
-									onClick={onCollapse}
-								>
-									<span className="sr-only">{t("collapseSidebar")}</span>
-									<ChevronLeft className="h-4 w-4" />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent side="bottom">
-								<p>{t("collapseSidebar")}</p>
-							</TooltipContent>
-						</Tooltip>
-					)}
+				<SidebarCommands
+					onCollapse={onCollapse}
+					onOpenFile={handleOpenFile}
+					onNewFile={(ext) =>
+						void (async () => {
+							const createdPath = await handleNewFile(ext, createTargetDir);
+							if (!createdPath) return;
+							const state = useAppStore.getState();
+							const activeRepo = state.repos.find(
+								(r) => r.id === state.activeRepoId,
+							);
+							const targetDir =
+								createTargetDir && createTargetDir.trim().length > 0
+									? createTargetDir
+									: activeRepo?.path;
+							if (!targetDir) return;
+							const name = createdPath.split(/[\\/]/).pop() ?? createdPath;
+							const newNode: FileNode = {
+								id: createdPath,
+								name,
+								path: createdPath,
+								type: "file",
+							};
+							useAppStore.setState((storeState) => ({
+								fileTree: addNodeToTree(
+									storeState.fileTree,
+									targetDir,
+									newNode,
+								),
+							}));
+							setPendingRenamePath(createdPath);
+							scheduleBackgroundRefresh();
+						})()
+					}
+					onNewFolder={() =>
+						void (async () => {
+							const createdPath = await handleNewFolder(createTargetDir);
+							if (!createdPath) return;
+							const state = useAppStore.getState();
+							const activeRepo = state.repos.find(
+								(r) => r.id === state.activeRepoId,
+							);
+							const targetDir =
+								createTargetDir && createTargetDir.trim().length > 0
+									? createTargetDir
+									: activeRepo?.path;
+							if (!targetDir) return;
+							const name = createdPath.split(/[\\/]/).pop() ?? createdPath;
+							const newNode: FileNode = {
+								id: createdPath,
+								name,
+								path: createdPath,
+								type: "folder",
+								children: [],
+								isExpanded: true,
+							};
+							useAppStore.setState((storeState) => ({
+								fileTree: addNodeToTree(
+									storeState.fileTree,
+									targetDir,
+									newNode,
+								),
+							}));
+							setPendingRenamePath(createdPath);
+							scheduleBackgroundRefresh();
+						})()
+					}
+					onToggleTheme={handleToggleTheme}
+					themeMode={themeMode}
+				/>
 
-					{workspaceMode === "editor" && (
-						<>
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button
-										variant="ghost"
-										size="icon"
-										className="h-8 w-8 hover:bg-blue-500/20 hover:text-blue-600"
-										onClick={handleOpenFile}
-									>
-										<FolderOpen className="h-4 w-4" />
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent side="bottom">
-									<p>{t("openFile")}</p>
-								</TooltipContent>
-							</Tooltip>
-
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button
-										variant="ghost"
-										size="icon"
-										className="h-8 w-8 hover:bg-blue-500/20 hover:text-blue-600"
-										onClick={() => handleNewFileWithExt(".atex")}
-									>
-										<span className="sr-only">{t("newAtex")}</span>
-										<FileMusic className="h-4 w-4" />
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent side="bottom">
-									<p>{t("newAtex")}</p>
-								</TooltipContent>
-							</Tooltip>
-
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button
-										variant="ghost"
-										size="icon"
-										className="h-8 w-8 hover:bg-blue-500/20 hover:text-blue-600"
-										onClick={() => handleNewFileWithExt(".md")}
-									>
-										<span className="sr-only">{t("newMd")}</span>
-										<FileDown className="h-4 w-4" />
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent side="bottom">
-									<p>{t("newMd")}</p>
-								</TooltipContent>
-							</Tooltip>
-						</>
-					)}
-
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<Button
-								variant="ghost"
-								size="icon"
-								className="h-8 w-8 hover:bg-blue-500/20 hover:text-blue-600"
-								onClick={handleToggleTheme}
-							>
-								<span className="sr-only">{t("toggleTheme")}</span>
-								<Sun className="h-4 w-4 block dark:hidden" />
-								<Moon className="h-4 w-4 hidden dark:block" />
-							</Button>
-						</TooltipTrigger>
-						<TooltipContent side="bottom">
-							<p>{t("toggleTheme")}</p>
-						</TooltipContent>
-					</Tooltip>
-				</div>
-
-				{/* 文件列表 */}
-				<ScrollArea className="flex-1 w-full overflow-hidden">
-					<div className="py-1 w-full overflow-hidden">
-						{workspaceMode === "tutorial" ? (
-							<TutorialsSidebar />
-						) : workspaceMode === "settings" ? (
-							<SettingsSidebar />
-						) : files.length === 0 ? (
-							<div className="p-3 text-xs text-muted-foreground text-center">
-								{t("noFiles")}
-							</div>
-						) : (
-							files.map((file) => {
-								const fileExt =
-									editingId === file.id ? renameExt : splitName(file.name).ext;
-								const isActive = activeFileId === file.id;
-								const iconClass = `shrink-0 h-3.5 w-3.5 transition-colors ${
-									isActive
-										? "text-blue-600"
-										: "text-muted-foreground group-hover:text-blue-600"
-								}`;
-
-								return (
-									// biome-ignore lint/a11y/useSemanticElements: 需要在内部嵌套删除按钮，不能使用button
-									<div
-										key={file.id}
-										onClick={() => {
-											// 如果点击已选中的文件，则取消选择；否则选择该文件
-											if (isActive) {
-												setActiveFile(null);
-											} else {
-												setActiveFile(file.id);
-												setWorkspaceMode("editor");
-											}
-										}}
-										onKeyDown={(e) => {
-											if (e.key === "Enter" || e.key === " ") {
-												// 如果按 Enter/Space 在已选中的文件上，则取消选择；否则选择该文件
-												if (isActive) {
-													setActiveFile(null);
-												} else {
-													setActiveFile(file.id);
-													setWorkspaceMode("editor");
-												}
-											}
-										}}
-										role="button"
-										tabIndex={0}
-										className={`
-											w-full max-w-full group flex items-center gap-2 px-3 py-1.5 cursor-pointer overflow-hidden
-											text-xs text-muted-foreground transition-colors text-left
-											${isActive ? "bg-blue-500/20 text-blue-600" : "hover:bg-blue-500/20 hover:text-blue-600"}
-										`}
-									>
-										{/* 图标 */}
-										{fileExt === "atex" ? (
-											<FileMusic className={iconClass} />
-										) : fileExt === "md" ? (
-											<FileDown className={iconClass} />
-										) : (
-											<FileText className={iconClass} />
-										)}
-
-										{/* 文件名 - 关键：使用 truncate + min-w-0 */}
-										<span className="flex-1 min-w-0 truncate h-6 leading-6">
-											{editingId === file.id ? (
-												<input
-													ref={inputRef}
-													value={renameValue}
-													onChange={(e) => setRenameValue(e.target.value)}
-													onBlur={() => handleRenameSubmit(file.id)}
-													onKeyDown={(e) => {
-														if (e.key === "Enter") {
-															handleRenameSubmit(file.id);
-														} else if (e.key === "Escape") {
-															handleRenameCancel(e);
-														}
-													}}
-													className="w-full bg-transparent text-xs h-6 leading-6 px-1 border border-border rounded-sm outline-none"
-													spellCheck={false}
-													autoComplete="off"
-												/>
-											) : (
-												splitName(file.name).base
-											)}
-										</span>
-
-										{/* 操作按钮 */}
-										<div className="shrink-0 flex items-center gap-0.5">
-											<button
-												type="button"
-												onClick={(e) => handleRenameClick(e, file)}
-												className={`opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded transition-opacity w-6 h-6 flex items-center justify-center hover:bg-blue-500/20 focus-visible:bg-blue-500/20 ${
-													isActive
-														? "text-blue-600"
-														: "text-muted-foreground hover:text-blue-600 focus-visible:text-blue-600"
-												}`}
-												aria-label={t("rename")}
-											>
-												<span className="sr-only">{t("renameFile")}</span>
-												<Edit className="h-3 w-3" />
-											</button>
-											<button
-												type="button"
-												onClick={async (e) => {
-													e.stopPropagation();
-													try {
-														await window.electronAPI.revealInFolder(file.path);
-													} catch (err) {
-														console.error("revealInFolder failed:", err);
-													}
-												}}
-												className={`opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded transition-opacity w-6 h-6 flex items-center justify-center hover:bg-blue-500/20 focus-visible:bg-blue-500/20 ${
-													isActive
-														? "text-blue-600"
-														: "text-muted-foreground hover:text-blue-600 focus-visible:text-blue-600"
-												}`}
-												aria-label={t("showInExplorer")}
-											>
-												<span className="sr-only">{t("showInExplorer")}</span>
-												<FolderOpen className="h-3.5 w-3.5" />
-											</button>
-										</div>
-
-										{/* 扩展名（仅显示 .md，隐藏 .atex） */}
-										{fileExt === "md" && (
-											<code
-												className={`shrink-0 font-mono bg-muted/50 px-1 rounded text-xs h-6 leading-6 select-none ${
-													isActive ? "text-blue-600" : "text-muted-foreground"
-												}`}
-											>
-												{fileExt}
-											</code>
-										)}
-									</div>
-								);
-							})
-						)}
-					</div>
+				<ScrollArea className="flex-1 w-full overflow-hidden min-h-0">
+					<div className="py-1 w-full overflow-hidden">{renderContent()}</div>
 				</ScrollArea>
 
-				{/* Sidebar bottom bar */}
-				<div className="h-9 px-3 flex items-center gap-1 border-t border-border bg-muted/40 shrink-0">
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<IconButton
-								active={workspaceMode === "tutorial"}
-								onClick={() => {
-									const newMode =
-										workspaceMode === "tutorial" ? "editor" : "tutorial";
-									setWorkspaceMode(newMode);
-									if (newMode === "tutorial") {
-										setActiveTutorialId(null);
-									}
-								}}
-								aria-label={t("tutorial")}
-							>
-								<FileQuestion className="h-4 w-4" />
-							</IconButton>
-						</TooltipTrigger>
-						<TooltipContent side="top">
-							<p>
-								{workspaceMode === "tutorial"
-									? t("exitTutorial")
-									: t("enterTutorial")}
-							</p>
-						</TooltipContent>
-					</Tooltip>
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<IconButton
-								active={workspaceMode === "settings"}
-								onClick={handleOpenSettings}
-								aria-label={t("settings")}
-							>
-								<Settings className="h-4 w-4" />
-							</IconButton>
-						</TooltipTrigger>
-						<TooltipContent side="top">
-							<p>{t("settings")}</p>
-						</TooltipContent>
-					</Tooltip>
-				</div>
+				<SidebarBottomBar />
 			</div>
+
+			{sidebarToast && (
+				<div className="fixed left-1/2 -translate-x-1/2 bottom-4 z-[70] px-3 py-2 rounded-md border border-border bg-popover text-popover-foreground text-xs shadow-lg">
+					{sidebarToast}
+				</div>
+			)}
+
+			<DeleteConfirmDialog
+				isOpen={deleteDialogOpen}
+				onClose={() => {
+					setDeleteDialogOpen(false);
+					setPendingDeleteNode(null);
+				}}
+				onConfirm={handleDeleteConfirm}
+				fileName={pendingDeleteNode?.name ?? ""}
+			/>
 		</TooltipProvider>
 	);
 }
