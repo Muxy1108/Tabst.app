@@ -179,6 +179,8 @@
 		"ignoredBuiltDependencies": [
 			"electron-winstaller",
 			"esbuild",
+			"fs-xattr",
+			"macos-alias",
 			"msw"
 		]
 	}
