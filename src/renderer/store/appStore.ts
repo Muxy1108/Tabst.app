@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import i18n, { type Locale } from "../i18n";
+import { extractAtDocFileMeta } from "../lib/atdoc";
 import { loadGlobalSettings, saveGlobalSettings } from "../lib/global-settings";
 import type { StaffDisplayOptions } from "../lib/staff-config";
+import type { TutorialAudience } from "../lib/tutorial-loader";
 import type {
 	DeleteBehavior,
 	FileNode,
@@ -22,6 +24,16 @@ function getInitialLocale(): Locale {
 	return "zh-cn";
 }
 
+function isSameStringList(a: string[] | undefined, b: string[] | undefined) {
+	if (!a && !b) return true;
+	if (!a || !b) return false;
+	if (a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i += 1) {
+		if (a[i] !== b[i]) return false;
+	}
+	return true;
+}
+
 /**
  * @deprecated 使用 FileNode 替代
  */
@@ -30,6 +42,24 @@ export interface FileItem {
 	name: string;
 	path: string;
 	content: string;
+	metaClass?: string[];
+	metaTags?: string[];
+	metaStatus?: "draft" | "active" | "done" | "released";
+	metaTabist?: string;
+	metaApp?: string;
+	metaGithub?: string;
+	metaLicense?:
+		| "CC0-1.0"
+		| "CC-BY-4.0"
+		| "CC-BY-SA-4.0"
+		| "CC-BY-NC-4.0"
+		| "CC-BY-NC-SA-4.0"
+		| "CC-BY-ND-4.0"
+		| "CC-BY-NC-ND-4.0";
+	metaSource?: string;
+	metaRelease?: string;
+	metaAlias?: string[];
+	metaTitle?: string;
 	/** Whether `content` is hydrated from disk/user input (vs empty placeholder from file tree scan). */
 	contentLoaded?: boolean;
 }
@@ -83,6 +113,7 @@ export type PlayerComponentType =
 	| "tracksControls" // 轨道选择控件
 	| "zoomControls" // 缩放控件 (zoom out/input/zoom in)
 	| "playbackSpeedControls" // 播放速度和节拍器控件
+	| "playbackProgress"
 	| "playbackTransport"; // 播放控制 (play/pause/stop/refresh)
 
 /**
@@ -150,6 +181,10 @@ interface AppState {
 
 	// 🆕 播放器光标位置 - 暂停时也保留，用于显示黄色小节高亮
 	playerCursorPosition: PlaybackBeatInfo | null;
+	playbackPositionTick: number;
+	playbackEndTick: number;
+	playbackPositionMs: number;
+	playbackEndMs: number;
 	// 🆕 编辑器焦点状态（用于控制 player enable）
 	editorHasFocus: boolean;
 	setEditorHasFocus: (hasFocus: boolean) => void;
@@ -159,6 +194,7 @@ interface AppState {
 		pause?: () => void;
 		stop?: () => void;
 		refresh?: () => void;
+		seekPlaybackPosition?: (tick: number) => void;
 		applyZoom?: (percent: number) => void;
 		applyPlaybackSpeed?: (speed: number) => void;
 		setMetronomeVolume?: (volume: number) => void;
@@ -186,6 +222,10 @@ interface AppState {
 
 	countInEnabled: boolean;
 	setCountInEnabled: (v: boolean) => void;
+	enablePlaybackProgressBar: boolean;
+	setEnablePlaybackProgressBar: (v: boolean) => void;
+	enablePlaybackProgressSeek: boolean;
+	setEnablePlaybackProgressSeek: (v: boolean) => void;
 
 	/** 是否启用编辑器播放同步滚动 */
 	enableSyncScroll: boolean;
@@ -204,11 +244,16 @@ interface AppState {
 	// 🆕 alphaTab API / score 生命周期标识
 	apiInstanceId: number;
 	scoreVersion: number;
+	editorRefreshVersion: number;
+	bottomBarRefreshVersion: number;
 	bumpApiInstanceId: () => void;
 	bumpScoreVersion: () => void;
-	// 工作区模式：editor | tutorial | settings
-	workspaceMode: "editor" | "tutorial" | "settings";
-	setWorkspaceMode: (mode: "editor" | "tutorial" | "settings") => void;
+	bumpEditorRefreshVersion: () => void;
+	bumpBottomBarRefreshVersion: () => void;
+	workspaceMode: "editor" | "enjoy" | "tutorial" | "settings";
+	setWorkspaceMode: (
+		mode: "editor" | "enjoy" | "tutorial" | "settings",
+	) => void;
 
 	// 🆕 第一个谱表显示选项
 	firstStaffOptions: StaffDisplayOptions | null;
@@ -219,6 +264,8 @@ interface AppState {
 	// 教程选择（用于侧边栏与教程视图间同步）
 	activeTutorialId: string | null;
 	setActiveTutorialId: (id: string | null) => void;
+	tutorialAudience: TutorialAudience;
+	setTutorialAudience: (audience: TutorialAudience) => void;
 	// 设置页选择（用于侧边栏与设置视图间同步）
 	activeSettingsPageId: string | null;
 	setActiveSettingsPageId: (id: string | null) => void;
@@ -232,6 +279,48 @@ interface AppState {
 	renameFile: (id: string, newName: string) => Promise<boolean>;
 	setActiveFile: (id: string | null) => void;
 	updateFileContent: (id: string, content: string) => void;
+	setFileMeta: (
+		id: string,
+		metaClass: string[],
+		metaTags: string[],
+		metaStatus?: "draft" | "active" | "done" | "released",
+		metaTabist?: string,
+		metaApp?: string,
+		metaGithub?: string,
+		metaLicense?:
+			| "CC0-1.0"
+			| "CC-BY-4.0"
+			| "CC-BY-SA-4.0"
+			| "CC-BY-NC-4.0"
+			| "CC-BY-NC-SA-4.0"
+			| "CC-BY-ND-4.0"
+			| "CC-BY-NC-ND-4.0",
+		metaSource?: string,
+		metaRelease?: string,
+		metaAlias?: string[],
+		metaTitle?: string,
+	) => void;
+	setFileMetaByPath: (
+		path: string,
+		metaClass: string[],
+		metaTags: string[],
+		metaStatus?: "draft" | "active" | "done" | "released",
+		metaTabist?: string,
+		metaApp?: string,
+		metaGithub?: string,
+		metaLicense?:
+			| "CC0-1.0"
+			| "CC-BY-4.0"
+			| "CC-BY-SA-4.0"
+			| "CC-BY-NC-4.0"
+			| "CC-BY-NC-SA-4.0"
+			| "CC-BY-ND-4.0"
+			| "CC-BY-NC-ND-4.0",
+		metaSource?: string,
+		metaRelease?: string,
+		metaAlias?: string[],
+		metaTitle?: string,
+	) => void;
 	getActiveFile: () => FileItem | undefined;
 
 	// 🆕 选区操作
@@ -247,6 +336,13 @@ interface AppState {
 
 	// 🆕 播放器光标位置操作（暂停时也保留）
 	setPlayerCursorPosition: (position: PlaybackBeatInfo | null) => void;
+	setPlaybackProgress: (progress: {
+		positionTick: number;
+		endTick: number;
+		positionMs: number;
+		endMs: number;
+	}) => void;
+	resetPlaybackProgress: () => void;
 	/**
 	 * 🆕 清除"播放相关"高亮状态，回到无高亮状态
 	 * - 清除绿色当前 beat 高亮
@@ -538,6 +634,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 							set({ countInEnabled: prefs.countInEnabled });
 							get().playerControls?.setCountInEnabled?.(prefs.countInEnabled);
 						}
+						if (typeof prefs.enablePlaybackProgressBar === "boolean") {
+							set({
+								enablePlaybackProgressBar: prefs.enablePlaybackProgressBar,
+							});
+						}
+						if (typeof prefs.enablePlaybackProgressSeek === "boolean") {
+							set({
+								enablePlaybackProgressSeek: prefs.enablePlaybackProgressSeek,
+							});
+						}
 						if (typeof prefs.enableSyncScroll === "boolean") {
 							set({ enableSyncScroll: prefs.enableSyncScroll });
 						}
@@ -658,6 +764,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 	editorCursor: null,
 	playbackBeat: null,
 	playerCursorPosition: null,
+	playbackPositionTick: 0,
+	playbackEndTick: 0,
+	playbackPositionMs: 0,
+	playbackEndMs: 0,
 	editorHasFocus: false,
 	setEditorHasFocus: (hasFocus) => set({ editorHasFocus: hasFocus }),
 	playerControls: null,
@@ -696,6 +806,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 	setCountInEnabled: (v) => {
 		set({ countInEnabled: v });
 		void mergeAndSaveWorkspacePreferences({ countInEnabled: v });
+	},
+	enablePlaybackProgressBar: true,
+	setEnablePlaybackProgressBar: (v) => {
+		set({ enablePlaybackProgressBar: v });
+		void mergeAndSaveWorkspacePreferences({ enablePlaybackProgressBar: v });
+	},
+	enablePlaybackProgressSeek: true,
+	setEnablePlaybackProgressSeek: (v) => {
+		set({ enablePlaybackProgressSeek: v });
+		void mergeAndSaveWorkspacePreferences({ enablePlaybackProgressSeek: v });
 	},
 	// 是否启用编辑器播放同步滚动
 	enableSyncScroll: false,
@@ -738,6 +858,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 				description: "Speed selector and metronome toggle",
 			},
 			{
+				type: "playbackProgress",
+				enabled: true,
+				label: "Playback Progress",
+				description: "Draggable playback timeline",
+			},
+			{
 				type: "playbackTransport",
 				enabled: true,
 				label: "Transport Controls",
@@ -771,17 +897,27 @@ export const useAppStore = create<AppState>((set, get) => ({
 	},
 	apiInstanceId: 0,
 	scoreVersion: 0,
+	editorRefreshVersion: 0,
+	bottomBarRefreshVersion: 0,
 	bumpApiInstanceId: () =>
 		set((state) => ({ apiInstanceId: state.apiInstanceId + 1 })),
 	bumpScoreVersion: () =>
 		set((state) => ({ scoreVersion: state.scoreVersion + 1 })),
+	bumpEditorRefreshVersion: () =>
+		set((state) => ({ editorRefreshVersion: state.editorRefreshVersion + 1 })),
+	bumpBottomBarRefreshVersion: () =>
+		set((state) => ({
+			bottomBarRefreshVersion: state.bottomBarRefreshVersion + 1,
+		})),
 	workspaceMode: "editor",
-	setWorkspaceMode: (mode: "editor" | "tutorial" | "settings") =>
+	setWorkspaceMode: (mode: "editor" | "enjoy" | "tutorial" | "settings") =>
 		set({ workspaceMode: mode }),
 	firstStaffOptions: null,
 	pendingStaffToggle: null,
 	activeTutorialId: null,
 	setActiveTutorialId: (id) => set({ activeTutorialId: id }),
+	tutorialAudience: "power-user",
+	setTutorialAudience: (audience) => set({ tutorialAudience: audience }),
 
 	activeSettingsPageId: null,
 	setActiveSettingsPageId: (id) => set({ activeSettingsPageId: id }),
@@ -805,6 +941,24 @@ export const useAppStore = create<AppState>((set, get) => ({
 
 	addFile: (file) => {
 		set((state) => {
+			const parsedMeta = extractAtDocFileMeta(file.content ?? "");
+			const incomingMetaClass =
+				file.metaClass ??
+				(parsedMeta.metaClass.length > 0 ? parsedMeta.metaClass : undefined);
+			const incomingMetaTags =
+				file.metaTags ??
+				(parsedMeta.metaTags.length > 0 ? parsedMeta.metaTags : undefined);
+			const incomingMetaStatus = file.metaStatus ?? parsedMeta.metaStatus;
+			const incomingMetaTabist = file.metaTabist ?? parsedMeta.metaTabist;
+			const incomingMetaApp = file.metaApp ?? parsedMeta.metaApp;
+			const incomingMetaGithub = file.metaGithub ?? parsedMeta.metaGithub;
+			const incomingMetaLicense = file.metaLicense ?? parsedMeta.metaLicense;
+			const incomingMetaSource = file.metaSource ?? parsedMeta.metaSource;
+			const incomingMetaRelease = file.metaRelease ?? parsedMeta.metaRelease;
+			const incomingMetaAlias =
+				file.metaAlias ??
+				(parsedMeta.metaAlias.length > 0 ? parsedMeta.metaAlias : undefined);
+			const incomingMetaTitle = file.metaTitle ?? parsedMeta.metaTitle;
 			const existing = state.files.find((f) => f.path === file.path);
 			if (existing) {
 				const merged = {
@@ -812,6 +966,17 @@ export const useAppStore = create<AppState>((set, get) => ({
 					// Prefer latest metadata/content when provided
 					name: file.name || existing.name,
 					content: file.content ?? existing.content,
+					metaClass: incomingMetaClass ?? existing.metaClass,
+					metaTags: incomingMetaTags ?? existing.metaTags,
+					metaStatus: incomingMetaStatus ?? existing.metaStatus,
+					metaTabist: incomingMetaTabist ?? existing.metaTabist,
+					metaApp: incomingMetaApp ?? existing.metaApp,
+					metaGithub: incomingMetaGithub ?? existing.metaGithub,
+					metaLicense: incomingMetaLicense ?? existing.metaLicense,
+					metaSource: incomingMetaSource ?? existing.metaSource,
+					metaRelease: incomingMetaRelease ?? existing.metaRelease,
+					metaAlias: incomingMetaAlias ?? existing.metaAlias,
+					metaTitle: incomingMetaTitle ?? existing.metaTitle,
 					contentLoaded: file.contentLoaded ?? true,
 				};
 				return {
@@ -824,7 +989,21 @@ export const useAppStore = create<AppState>((set, get) => ({
 				...state,
 				files: [
 					...state.files,
-					{ ...file, contentLoaded: file.contentLoaded ?? true },
+					{
+						...file,
+						metaClass: incomingMetaClass,
+						metaTags: incomingMetaTags,
+						metaStatus: incomingMetaStatus,
+						metaTabist: incomingMetaTabist,
+						metaApp: incomingMetaApp,
+						metaGithub: incomingMetaGithub,
+						metaLicense: incomingMetaLicense,
+						metaSource: incomingMetaSource,
+						metaRelease: incomingMetaRelease,
+						metaAlias: incomingMetaAlias,
+						metaTitle: incomingMetaTitle,
+						contentLoaded: file.contentLoaded ?? true,
+					},
 				],
 				activeFileId: file.id,
 			};
@@ -917,11 +1096,170 @@ export const useAppStore = create<AppState>((set, get) => ({
 	},
 
 	updateFileContent: (id, content) => {
+		const parsedMeta = extractAtDocFileMeta(content);
 		set((state) => ({
 			files: state.files.map((f) =>
-				f.id === id ? { ...f, content, contentLoaded: true } : f,
+				f.id === id
+					? {
+							...f,
+							content,
+							metaClass:
+								parsedMeta.metaClass.length > 0
+									? parsedMeta.metaClass
+									: undefined,
+							metaTags:
+								parsedMeta.metaTags.length > 0
+									? parsedMeta.metaTags
+									: undefined,
+							metaStatus: parsedMeta.metaStatus,
+							metaTabist: parsedMeta.metaTabist,
+							metaApp: parsedMeta.metaApp,
+							metaGithub: parsedMeta.metaGithub,
+							metaLicense: parsedMeta.metaLicense,
+							metaSource: parsedMeta.metaSource,
+							metaRelease: parsedMeta.metaRelease,
+							metaAlias:
+								parsedMeta.metaAlias.length > 0
+									? parsedMeta.metaAlias
+									: undefined,
+							metaTitle: parsedMeta.metaTitle,
+							contentLoaded: true,
+						}
+					: f,
 			),
 		}));
+	},
+
+	setFileMeta: (
+		id,
+		metaClass,
+		metaTags,
+		metaStatus,
+		metaTabist,
+		metaApp,
+		metaGithub,
+		metaLicense,
+		metaSource,
+		metaRelease,
+		metaAlias,
+		metaTitle,
+	) => {
+		set((state) => {
+			let changed = false;
+			const nextFiles = state.files.map((f) => {
+				if (f.id !== id) return f;
+				const nextClass = metaClass.length > 0 ? [...metaClass] : undefined;
+				const nextTags = metaTags.length > 0 ? [...metaTags] : undefined;
+				const nextStatus = metaStatus;
+				const nextTabist = metaTabist;
+				const nextApp = metaApp;
+				const nextGithub = metaGithub;
+				const nextLicense = metaLicense;
+				const nextSource = metaSource;
+				const nextRelease = metaRelease;
+				const nextAlias =
+					metaAlias && metaAlias.length > 0 ? [...metaAlias] : undefined;
+				const nextTitle = metaTitle;
+				if (
+					isSameStringList(f.metaClass, nextClass) &&
+					isSameStringList(f.metaTags, nextTags) &&
+					f.metaStatus === nextStatus &&
+					f.metaTabist === nextTabist &&
+					f.metaApp === nextApp &&
+					f.metaGithub === nextGithub &&
+					f.metaLicense === nextLicense &&
+					f.metaSource === nextSource &&
+					f.metaRelease === nextRelease &&
+					isSameStringList(f.metaAlias, nextAlias) &&
+					f.metaTitle === nextTitle
+				) {
+					return f;
+				}
+				changed = true;
+				return {
+					...f,
+					metaClass: nextClass,
+					metaTags: nextTags,
+					metaStatus: nextStatus,
+					metaTabist: nextTabist,
+					metaApp: nextApp,
+					metaGithub: nextGithub,
+					metaLicense: nextLicense,
+					metaSource: nextSource,
+					metaRelease: nextRelease,
+					metaAlias: nextAlias,
+					metaTitle: nextTitle,
+				};
+			});
+			if (!changed) return state;
+			return { ...state, files: nextFiles };
+		});
+	},
+
+	setFileMetaByPath: (
+		path,
+		metaClass,
+		metaTags,
+		metaStatus,
+		metaTabist,
+		metaApp,
+		metaGithub,
+		metaLicense,
+		metaSource,
+		metaRelease,
+		metaAlias,
+		metaTitle,
+	) => {
+		set((state) => {
+			let changed = false;
+			const nextFiles = state.files.map((f) => {
+				if (f.path !== path) return f;
+				const nextClass = metaClass.length > 0 ? [...metaClass] : undefined;
+				const nextTags = metaTags.length > 0 ? [...metaTags] : undefined;
+				const nextStatus = metaStatus;
+				const nextTabist = metaTabist;
+				const nextApp = metaApp;
+				const nextGithub = metaGithub;
+				const nextLicense = metaLicense;
+				const nextSource = metaSource;
+				const nextRelease = metaRelease;
+				const nextAlias =
+					metaAlias && metaAlias.length > 0 ? [...metaAlias] : undefined;
+				const nextTitle = metaTitle;
+				if (
+					isSameStringList(f.metaClass, nextClass) &&
+					isSameStringList(f.metaTags, nextTags) &&
+					f.metaStatus === nextStatus &&
+					f.metaTabist === nextTabist &&
+					f.metaApp === nextApp &&
+					f.metaGithub === nextGithub &&
+					f.metaLicense === nextLicense &&
+					f.metaSource === nextSource &&
+					f.metaRelease === nextRelease &&
+					isSameStringList(f.metaAlias, nextAlias) &&
+					f.metaTitle === nextTitle
+				) {
+					return f;
+				}
+				changed = true;
+				return {
+					...f,
+					metaClass: nextClass,
+					metaTags: nextTags,
+					metaStatus: nextStatus,
+					metaTabist: nextTabist,
+					metaApp: nextApp,
+					metaGithub: nextGithub,
+					metaLicense: nextLicense,
+					metaSource: nextSource,
+					metaRelease: nextRelease,
+					metaAlias: nextAlias,
+					metaTitle: nextTitle,
+				};
+			});
+			if (!changed) return state;
+			return { ...state, files: nextFiles };
+		});
 	},
 
 	getActiveFile: () => {
@@ -958,10 +1296,31 @@ export const useAppStore = create<AppState>((set, get) => ({
 	setPlayerCursorPosition: (position) => {
 		set({ playerCursorPosition: position });
 	},
+	setPlaybackProgress: (progress) => {
+		set({
+			playbackPositionTick: progress.positionTick,
+			playbackEndTick: progress.endTick,
+			playbackPositionMs: progress.positionMs,
+			playbackEndMs: progress.endMs,
+		});
+	},
+	resetPlaybackProgress: () => {
+		set({
+			playbackPositionTick: 0,
+			playbackEndTick: 0,
+			playbackPositionMs: 0,
+			playbackEndMs: 0,
+		});
+	},
 
 	// 🆕 清除播放相关高亮（绿色 + 黄色）
 	clearPlaybackHighlights: () => {
-		set({ playbackBeat: null, playerCursorPosition: null });
+		set({
+			playbackBeat: null,
+			playerCursorPosition: null,
+			playbackPositionTick: 0,
+			playbackPositionMs: 0,
+		});
 	},
 
 	// 🆕 清除所有高亮（选区 + 播放）
@@ -970,6 +1329,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 			scoreSelection: null,
 			playbackBeat: null,
 			playerCursorPosition: null,
+			playbackPositionTick: 0,
+			playbackPositionMs: 0,
 		});
 	},
 
@@ -1118,6 +1479,17 @@ function reconcileFilesWithTree(
 			...next,
 			id: existing.id ?? next.id,
 			content: existing.content ?? next.content,
+			metaClass: existing.metaClass,
+			metaTags: existing.metaTags,
+			metaStatus: existing.metaStatus,
+			metaTabist: existing.metaTabist,
+			metaApp: existing.metaApp,
+			metaGithub: existing.metaGithub,
+			metaLicense: existing.metaLicense,
+			metaSource: existing.metaSource,
+			metaRelease: existing.metaRelease,
+			metaAlias: existing.metaAlias,
+			metaTitle: existing.metaTitle,
 			contentLoaded: existing.contentLoaded ?? next.contentLoaded,
 		};
 	});

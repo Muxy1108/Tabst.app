@@ -3,6 +3,7 @@ import {
 	ChevronRight,
 	Hourglass,
 	ListMusic,
+	Lock,
 	Minus,
 	Music2,
 	Pause,
@@ -14,7 +15,11 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TutorialMetadata } from "../data/tutorials";
-import { getNextTutorial, getPrevTutorial } from "../lib/tutorial-loader";
+import {
+	getNextTutorial,
+	getPrevTutorial,
+	getTutorialDisplayTitle,
+} from "../lib/tutorial-loader";
 import { useAppStore } from "../store/appStore";
 import BpmStepper from "./BpmStepper";
 import StaffControls from "./StaffControls";
@@ -46,6 +51,8 @@ function TutorialBottomBar({
 	t: (key: string, opts?: Record<string, string>) => string;
 }) {
 	if (!prevTutorial && !nextTutorial) return null;
+	const prevTitle = prevTutorial ? getTutorialDisplayTitle(prevTutorial) : "";
+	const nextTitle = nextTutorial ? getTutorialDisplayTitle(nextTutorial) : "";
 	return (
 		<div className="flex items-center gap-3">
 			<span className="text-xs text-muted-foreground/70 hidden sm:inline">
@@ -60,13 +67,13 @@ function TutorialBottomBar({
 								onClick={() => onSelectTutorial(prevTutorial.id)}
 								className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-accent hover:text-accent-foreground transition-colors text-xs"
 								aria-label={t("toolbar:tutorial.prevWithTitle", {
-									title: prevTutorial.title,
+									title: prevTitle,
 								})}
 							>
 								<ChevronLeft className="h-3.5 w-3.5" />
 								<span className="text-xs">
 									{t("toolbar:tutorial.prevWithTitle", {
-										title: prevTutorial.title,
+										title: prevTitle,
 									})}
 								</span>
 							</button>
@@ -74,7 +81,7 @@ function TutorialBottomBar({
 						<TooltipContent side="top">
 							<p>
 								{t("toolbar:tutorial.prevTooltip", {
-									title: prevTutorial.title,
+									title: prevTitle,
 								})}
 							</p>
 						</TooltipContent>
@@ -88,12 +95,12 @@ function TutorialBottomBar({
 								onClick={() => onSelectTutorial(nextTutorial.id)}
 								className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-accent hover:text-accent-foreground transition-colors text-xs"
 								aria-label={t("toolbar:tutorial.nextWithTitle", {
-									title: nextTutorial.title,
+									title: nextTitle,
 								})}
 							>
 								<span className="text-xs">
 									{t("toolbar:tutorial.nextWithTitle", {
-										title: nextTutorial.title,
+										title: nextTitle,
 									})}
 								</span>
 								<ChevronRight className="h-3.5 w-3.5" />
@@ -102,7 +109,7 @@ function TutorialBottomBar({
 						<TooltipContent side="top">
 							<p>
 								{t("toolbar:tutorial.nextTooltip", {
-									title: nextTutorial.title,
+									title: nextTitle,
 								})}
 							</p>
 						</TooltipContent>
@@ -135,6 +142,14 @@ function SettingsBottomBar({
 	);
 }
 
+function formatPlaybackTime(ms: number): string {
+	if (!Number.isFinite(ms) || ms <= 0) return "00:00";
+	const totalSeconds = Math.floor(ms / 1000);
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 function EditorBottomBar({
 	firstStaffOptions,
 	requestStaffToggle,
@@ -148,6 +163,12 @@ function EditorBottomBar({
 	setMetronomeVolume,
 	countInEnabled,
 	setCountInEnabled,
+	enablePlaybackProgressBar,
+	enablePlaybackProgressSeek,
+	playbackPositionTick,
+	playbackEndTick,
+	playbackPositionMs,
+	playbackEndMs,
 	playerIsPlaying,
 	isTracksPanelOpen,
 	toggleTracksPanel,
@@ -173,12 +194,20 @@ function EditorBottomBar({
 	setMetronomeVolume: (v: number) => void;
 	countInEnabled: boolean;
 	setCountInEnabled: (v: boolean) => void;
+	enablePlaybackProgressBar: boolean;
+	enablePlaybackProgressSeek: boolean;
+	playbackPositionTick: number;
+	playbackEndTick: number;
+	playbackPositionMs: number;
+	playbackEndMs: number;
 	playerIsPlaying: boolean;
 	isTracksPanelOpen: boolean;
 	toggleTracksPanel: () => void;
-	setWorkspaceMode: (mode: "editor" | "tutorial" | "settings") => void;
+	setWorkspaceMode: (
+		mode: "editor" | "enjoy" | "tutorial" | "settings",
+	) => void;
 	setActiveSettingsPageId: (id: string | null) => void;
-	workspaceMode: "editor" | "tutorial" | "settings";
+	workspaceMode: "editor" | "enjoy" | "tutorial" | "settings";
 	activeSettingsPageId: string | null;
 	t: (key: string) => string;
 }) {
@@ -335,6 +364,57 @@ function EditorBottomBar({
 		</div>
 	);
 
+	const progressMaxTick = Math.max(0, Math.floor(playbackEndTick));
+	const progressCurrentTick = Math.max(
+		0,
+		Math.min(progressMaxTick, Math.floor(playbackPositionTick)),
+	);
+	const progressCurrentTime = formatPlaybackTime(playbackPositionMs);
+	const progressEndTime = formatPlaybackTime(
+		playbackEndMs > 0 ? playbackEndMs : playbackPositionMs,
+	);
+	const progressDisabled =
+		!enablePlaybackProgressSeek || progressMaxTick <= 0 || !playerControls;
+
+	const playbackProgressControls = enablePlaybackProgressBar ? (
+		<div className="flex items-center gap-2 min-w-0 w-full max-w-[460px] flex-[1.25]">
+			<div className="hidden md:block text-[10px] tabular-nums text-muted-foreground/80 w-10 text-right shrink-0">
+				{progressCurrentTime}
+			</div>
+			<input
+				type="range"
+				min={0}
+				max={progressMaxTick <= 0 ? 1 : progressMaxTick}
+				step={1}
+				value={progressCurrentTick}
+				disabled={progressDisabled}
+				onChange={(event) => {
+					if (!enablePlaybackProgressSeek) return;
+					const nextTick = Number.parseInt(event.currentTarget.value, 10);
+					if (Number.isNaN(nextTick)) return;
+					playerControls?.seekPlaybackPosition?.(nextTick);
+				}}
+				aria-label={t("toolbar:playbackProgress")}
+				className="h-1.5 w-full min-w-[160px] cursor-pointer accent-primary disabled:cursor-not-allowed"
+			/>
+			<div className="hidden md:block text-[10px] tabular-nums text-muted-foreground/80 w-10 shrink-0">
+				{progressEndTime}
+			</div>
+			{!enablePlaybackProgressSeek && (
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<span className="text-muted-foreground/60" aria-hidden="true">
+							<Lock className="h-3 w-3" />
+						</span>
+					</TooltipTrigger>
+					<TooltipContent side="top">
+						<p>{t("toolbar:playbackSeekDisabled")}</p>
+					</TooltipContent>
+				</Tooltip>
+			)}
+		</div>
+	) : null;
+
 	const transportControls = (
 		<>
 			<Tooltip>
@@ -461,6 +541,7 @@ function EditorBottomBar({
 		),
 		zoomControls,
 		playbackSpeedControls,
+		playbackProgress: playbackProgressControls,
 		playbackTransport: transportControls,
 	};
 
@@ -477,6 +558,8 @@ function EditorBottomBar({
 				className = "ml-2";
 			} else if (component.type === "playbackSpeedControls") {
 				className = "ml-3";
+			} else if (component.type === "playbackProgress") {
+				className = "ml-2 min-w-0 flex-1";
 			} else if (component.type === "playbackTransport") {
 				className = "ml-2";
 			}
@@ -489,7 +572,9 @@ function EditorBottomBar({
 		})
 		.filter(Boolean); // 移除null值
 
-	return <div className="flex items-center gap-2">{renderedComponents}</div>;
+	return (
+		<div className="flex items-center gap-2 min-w-0">{renderedComponents}</div>
+	);
 }
 
 export default function GlobalBottomBar() {
@@ -510,6 +595,16 @@ export default function GlobalBottomBar() {
 	const setMetronomeVolume = useAppStore((s) => s.setMetronomeVolume);
 	const countInEnabled = useAppStore((s) => s.countInEnabled);
 	const setCountInEnabled = useAppStore((s) => s.setCountInEnabled);
+	const enablePlaybackProgressBar = useAppStore(
+		(s) => s.enablePlaybackProgressBar,
+	);
+	const enablePlaybackProgressSeek = useAppStore(
+		(s) => s.enablePlaybackProgressSeek,
+	);
+	const playbackPositionTick = useAppStore((s) => s.playbackPositionTick);
+	const playbackEndTick = useAppStore((s) => s.playbackEndTick);
+	const playbackPositionMs = useAppStore((s) => s.playbackPositionMs);
+	const playbackEndMs = useAppStore((s) => s.playbackEndMs);
 
 	const isTracksPanelOpen = useAppStore((s) => s.isTracksPanelOpen);
 	const toggleTracksPanel = useAppStore((s) => s.toggleTracksPanel);
@@ -517,6 +612,7 @@ export default function GlobalBottomBar() {
 	const workspaceMode = useAppStore((s) => s.workspaceMode);
 	const activeTutorialId = useAppStore((s) => s.activeTutorialId);
 	const setActiveTutorialId = useAppStore((s) => s.setActiveTutorialId);
+	const tutorialAudience = useAppStore((s) => s.tutorialAudience);
 	const activeSettingsPageId = useAppStore((s) => s.activeSettingsPageId);
 	const setActiveSettingsPageId = useAppStore((s) => s.setActiveSettingsPageId);
 	const setWorkspaceMode = useAppStore((s) => s.setWorkspaceMode);
@@ -524,10 +620,10 @@ export default function GlobalBottomBar() {
 	const isSettingsMode = workspaceMode === "settings";
 
 	const prevTutorial = activeTutorialId
-		? getPrevTutorial(activeTutorialId)
+		? getPrevTutorial(activeTutorialId, tutorialAudience)
 		: null;
 	const nextTutorial = activeTutorialId
-		? getNextTutorial(activeTutorialId)
+		? getNextTutorial(activeTutorialId, tutorialAudience)
 		: null;
 
 	const bottomBarContent =
@@ -553,6 +649,12 @@ export default function GlobalBottomBar() {
 				setMetronomeVolume={setMetronomeVolume}
 				countInEnabled={countInEnabled}
 				setCountInEnabled={setCountInEnabled}
+				enablePlaybackProgressBar={enablePlaybackProgressBar}
+				enablePlaybackProgressSeek={enablePlaybackProgressSeek}
+				playbackPositionTick={playbackPositionTick}
+				playbackEndTick={playbackEndTick}
+				playbackPositionMs={playbackPositionMs}
+				playbackEndMs={playbackEndMs}
 				playerIsPlaying={playerIsPlaying}
 				isTracksPanelOpen={isTracksPanelOpen}
 				toggleTracksPanel={toggleTracksPanel}
@@ -578,6 +680,12 @@ export default function GlobalBottomBar() {
 				setMetronomeVolume={setMetronomeVolume}
 				countInEnabled={countInEnabled}
 				setCountInEnabled={setCountInEnabled}
+				enablePlaybackProgressBar={enablePlaybackProgressBar}
+				enablePlaybackProgressSeek={enablePlaybackProgressSeek}
+				playbackPositionTick={playbackPositionTick}
+				playbackEndTick={playbackEndTick}
+				playbackPositionMs={playbackPositionMs}
+				playbackEndMs={playbackEndMs}
 				playerIsPlaying={playerIsPlaying}
 				isTracksPanelOpen={isTracksPanelOpen}
 				toggleTracksPanel={toggleTracksPanel}
@@ -595,7 +703,9 @@ export default function GlobalBottomBar() {
 				<div className="flex items-center gap-3">
 					<span className="font-medium">Tabst@JayBridge</span>
 				</div>
-				<div className="flex items-center gap-2">{bottomBarContent}</div>
+				<div className="flex items-center gap-2 min-w-0 flex-1 justify-end">
+					{bottomBarContent}
+				</div>
 			</footer>
 		</TooltipProvider>
 	);

@@ -11,12 +11,20 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { ATDOC_KEY_DEFINITIONS } from "../data/atdoc-keys";
 import { useEditorLSP } from "../hooks/useEditorLSP";
 import { useEditorTheme } from "../hooks/useEditorTheme";
 import { updateEditorPlaybackHighlight } from "../lib/alphatex-playback-sync";
 import { updateEditorSelectionHighlight } from "../lib/alphatex-selection-sync";
+import {
+	ATDOC_INLINE_KEY_COMMAND_PREFIX,
+	EDITOR_COMMAND_EVENT,
+	EDITOR_OPEN_INLINE_COMMAND_EVENT,
+	type EditorCommandId,
+} from "../lib/command-palette";
 import { whitespaceDecoration } from "../lib/whitespace-decoration";
-import { useAppStore } from "../store/appStore";
+import { type FileItem, useAppStore } from "../store/appStore";
+import InlineEditorCommandBar from "./InlineEditorCommandBar";
 import Preview from "./Preview";
 import QuoteCard from "./QuoteCard";
 import TopBar from "./TopBar";
@@ -31,11 +39,24 @@ import {
 } from "./ui/tooltip";
 
 interface EditorProps {
+	enjoyMode?: boolean;
 	showExpandSidebar?: boolean;
 	onExpandSidebar?: () => void;
+	hidePreview?: boolean;
+	sandboxMode?: boolean;
+	sandboxFile?: FileItem | null;
+	onSandboxContentChange?: (content: string) => void;
 }
 
-export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
+export function Editor({
+	enjoyMode = false,
+	showExpandSidebar,
+	onExpandSidebar,
+	hidePreview = false,
+	sandboxMode = false,
+	sandboxFile = null,
+	onSandboxContentChange,
+}: EditorProps) {
 	const { t } = useTranslation(["sidebar", "common"]);
 	const editorRef = useRef<HTMLDivElement | null>(null);
 	const viewRef = useRef<EditorView | null>(null);
@@ -43,6 +64,9 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 	const lastContentRef = useRef<string>("");
 	const focusCleanupRef = useRef<(() => void) | null>(null);
 	const [previewApi, setPreviewApi] = useState<TracksPanelProps["api"]>(null);
+	const [inlineCommandOpen, setInlineCommandOpen] = useState(false);
+	const [inlineCommandTop, setInlineCommandTop] = useState(8);
+	const [inlineCommandLeft, setInlineCommandLeft] = useState(8);
 
 	// Track current file path to detect language changes
 	const currentFilePathRef = useRef<string>("");
@@ -50,10 +74,12 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 	// Track if we're currently updating to prevent recursive updates
 	const isUpdatingRef = useRef(false);
 
-	const activeFile = useAppStore((s) =>
+	const activeFileFromStore = useAppStore((s) =>
 		s.files.find((f) => f.id === s.activeFileId),
 	);
+	const activeFile = sandboxFile ?? activeFileFromStore;
 	const setWorkspaceMode = useAppStore((s) => s.setWorkspaceMode);
+	const workspaceMode = useAppStore((s) => s.workspaceMode);
 	const isTracksPanelOpen = useAppStore((s) => s.isTracksPanelOpen);
 	const setTracksPanelOpen = useAppStore((s) => s.setTracksPanelOpen);
 
@@ -76,9 +102,12 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 			if (update.docChanged && !isUpdatingRef.current) {
 				const newContent = update.state.doc.toString();
 				lastContentRef.current = newContent;
-				const currentActiveId = useAppStore.getState().activeFileId;
+				const currentActiveId =
+					sandboxFile?.id ?? useAppStore.getState().activeFileId;
 
-				if (currentActiveId) {
+				if (sandboxFile) {
+					onSandboxContentChange?.(newContent);
+				} else if (currentActiveId) {
 					useAppStore.getState().updateFileContent(currentActiveId, newContent);
 				}
 
@@ -87,23 +116,26 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 				}
 
 				saveTimerRef.current = window.setTimeout(async () => {
-					const state = useAppStore.getState();
-					const file = state.files.find((f) => f.id === state.activeFileId);
-					if (file) {
-						try {
-							await window.electronAPI.saveFile(file.path, newContent);
-						} catch (err) {
-							console.error("Failed to save file:", err);
+					if (!sandboxMode && !sandboxFile) {
+						const state = useAppStore.getState();
+						const file = state.files.find((f) => f.id === state.activeFileId);
+						if (file) {
+							try {
+								await window.electronAPI.saveFile(file.path, newContent);
+							} catch (err) {
+								console.error("Failed to save file:", err);
+							}
 						}
 					}
 					saveTimerRef.current = null;
 				}, 800);
 			}
 		});
-	}, []);
+	}, [onSandboxContentChange, sandboxFile, sandboxMode]);
 
 	// Main effect: Create editor or update it when file changes
 	useEffect(() => {
+		if (enjoyMode) return;
 		if (!editorRef.current) return;
 
 		// If there's no active file, destroy editor
@@ -249,6 +281,7 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 			}
 		})();
 	}, [
+		enjoyMode,
 		activeFile?.id,
 		activeFile?.content,
 		activeFile?.path,
@@ -289,6 +322,119 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 			effects: themeCompartment.reconfigure(themeExtension),
 		});
 	}, [themeExtension, themeCompartment]);
+
+	const runEditorCommand = useCallback((commandId: EditorCommandId) => {
+		const view = viewRef.current;
+		if (!view) return;
+
+		const insertTextAtSelection = (insertText: string) => {
+			const state = view.state;
+			const changes = state.selection.ranges.map((range) => ({
+				from: range.from,
+				to: range.to,
+				insert: insertText,
+			}));
+			view.dispatch({ changes });
+			view.focus();
+		};
+
+		switch (commandId) {
+			case "insert-atdoc-block": {
+				insertTextAtSelection("/**\n * \n */");
+				return;
+			}
+			case "insert-atdoc-directive": {
+				insertTextAtSelection("* at.meta.status=released");
+				return;
+			}
+			case "insert-atdoc-meta-preset": {
+				insertTextAtSelection(
+					[
+						'* at.meta.title=""',
+						'* at.meta.tag=""',
+						"* at.meta.status=released",
+						'* at.meta.tabist=""',
+						'* at.meta.app="tabst.app"',
+						'* at.meta.github="https://github.com/LIUBINfighter/Tabst.app"',
+						"* at.meta.license=CC-BY-4.0",
+						'* at.meta.source=""',
+						'* at.meta.release=""',
+						'* at.meta.alias=""',
+					].join("\n"),
+				);
+				return;
+			}
+		}
+
+		if (commandId.startsWith(ATDOC_INLINE_KEY_COMMAND_PREFIX)) {
+			const atdocKey = commandId.slice(ATDOC_INLINE_KEY_COMMAND_PREFIX.length);
+			const definition = ATDOC_KEY_DEFINITIONS.find(
+				(item) => item.key === atdocKey,
+			);
+			if (!definition) return;
+
+			const valueTemplate = (() => {
+				switch (definition.valueType) {
+					case "boolean":
+						return "true";
+					case "string":
+						return '""';
+					case "enum:status":
+						return "active";
+					case "enum:license":
+						return "CC-BY-4.0";
+					case "enum:layoutMode":
+						return "Page";
+					case "enum:scrollMode":
+						return "OffScreen";
+					case "color":
+						return "#22c55e";
+					default:
+						return "1";
+				}
+			})();
+
+			insertTextAtSelection(`* ${definition.key}=${valueTemplate}`);
+			return;
+		}
+		setInlineCommandOpen(false);
+	}, []);
+
+	const openInlineCommandBar = useCallback(() => {
+		const view = viewRef.current;
+		const host = editorRef.current;
+		if (!view || !host) return;
+
+		const anchorPos = view.state.selection.main.head;
+		const coords = view.coordsAtPos(anchorPos);
+		const hostRect = host.getBoundingClientRect();
+
+		const rawLeft = (coords?.left ?? hostRect.left + 16) - hostRect.left;
+		const rawTop = (coords?.bottom ?? hostRect.top + 16) - hostRect.top + 8;
+
+		setInlineCommandLeft(Math.max(8, Math.min(rawLeft, hostRect.width - 440)));
+		setInlineCommandTop(Math.max(8, Math.min(rawTop, hostRect.height - 280)));
+		setInlineCommandOpen(true);
+	}, []);
+
+	useEffect(() => {
+		const handler = (event: Event) => {
+			const customEvent = event as CustomEvent<EditorCommandId>;
+			if (!customEvent.detail) return;
+			runEditorCommand(customEvent.detail);
+		};
+		window.addEventListener(EDITOR_COMMAND_EVENT, handler);
+		return () => window.removeEventListener(EDITOR_COMMAND_EVENT, handler);
+	}, [runEditorCommand]);
+
+	useEffect(() => {
+		const handler = () => {
+			openInlineCommandBar();
+		};
+		window.addEventListener(EDITOR_OPEN_INLINE_COMMAND_EVENT, handler);
+		return () =>
+			window.removeEventListener(EDITOR_OPEN_INLINE_COMMAND_EVENT, handler);
+	}, [openInlineCommandBar]);
 
 	// 🆕 监听乐谱选区变化，更新编辑器高亮
 	useEffect(() => {
@@ -355,6 +501,25 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 			}
 		};
 	}, [cleanupLSP]);
+
+	useEffect(() => {
+		if (!enjoyMode) return;
+		if (viewRef.current) {
+			viewRef.current.destroy();
+			viewRef.current = null;
+		}
+		if (focusCleanupRef.current) {
+			focusCleanupRef.current();
+			focusCleanupRef.current = null;
+			useAppStore.getState().setEditorHasFocus(false);
+		}
+		cleanupLSP();
+		currentFilePathRef.current = "";
+		if (saveTimerRef.current) {
+			clearTimeout(saveTimerRef.current);
+			saveTimerRef.current = null;
+		}
+	}, [cleanupLSP, enjoyMode]);
 
 	// Cleanup editor when no active file - use useLayoutEffect to ensure cleanup before render
 	useLayoutEffect(() => {
@@ -458,50 +623,73 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 	return (
 		<div className="flex-1 flex flex-col h-full overflow-hidden">
 			{/* If the active file is AlphaTex, render a two-column editor/preview layout */}
-			{languageForActive === "alphatex" ? (
+			{languageForActive === "alphatex" && !hidePreview ? (
 				<div className="flex-1 overflow-hidden flex">
 					{/* Left: Editor */}
-					<div className="w-1/2 border-r border-border flex flex-col min-h-0">
-						{/* Column header to align with Preview header */}
-						<TopBar
-							leading={
-								showExpandSidebar ? (
-									<Button
-										variant="ghost"
-										size="icon"
-										className="h-8 w-8"
-										onClick={onExpandSidebar}
-										aria-label={t("expandSidebar")}
-									>
-										<ChevronRight className="h-4 w-4" />
-									</Button>
-								) : undefined
-							}
-							icon={
-								<Edit className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-							}
-							title={activeFile.name}
-						/>
-
-						<div className="flex-1 min-h-0 overflow-hidden relative">
-							{/* Host for CodeMirror */}
-							<div ref={editorRef} className="h-full" />
-
-							<TracksPanel
-								api={previewApi}
-								isOpen={isTracksPanelOpen && previewApi !== null}
-								onClose={() => setTracksPanelOpen(false)}
+					{!enjoyMode && (
+						<div className="w-1/2 border-r border-border flex flex-col min-h-0">
+							{/* Column header to align with Preview header */}
+							<TopBar
+								leading={
+									showExpandSidebar ? (
+										<Button
+											variant="ghost"
+											size="icon"
+											className="h-8 w-8"
+											onClick={onExpandSidebar}
+											aria-label={t("expandSidebar")}
+										>
+											<ChevronRight className="h-4 w-4" />
+										</Button>
+									) : undefined
+								}
+								icon={
+									<Edit className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+								}
+								title={activeFile.name}
 							/>
+
+							<div className="flex-1 min-h-0 overflow-hidden relative">
+								{/* Host for CodeMirror */}
+								<div ref={editorRef} className="h-full" />
+								<InlineEditorCommandBar
+									open={inlineCommandOpen}
+									top={inlineCommandTop}
+									left={inlineCommandLeft}
+									onClose={() => setInlineCommandOpen(false)}
+									onRunCommand={runEditorCommand}
+								/>
+
+								<TracksPanel
+									api={previewApi}
+									isOpen={isTracksPanelOpen && previewApi !== null}
+									onClose={() => setTracksPanelOpen(false)}
+								/>
+							</div>
 						</div>
-					</div>
+					)}
 
 					{/* Right: Preview */}
-					<div className="w-1/2 flex flex-col bg-card min-h-0 overflow-y-auto overflow-x-hidden">
+					<div
+						className={`${enjoyMode ? "w-full" : "w-1/2"} relative flex flex-col bg-card min-h-0 overflow-y-auto overflow-x-hidden`}
+					>
 						<Preview
 							fileName={`${activeFile.name} ${t("common:preview")}`}
 							content={activeFile.content}
 							onApiChange={setPreviewApi}
+							onEnjoyToggle={() =>
+								setWorkspaceMode(workspaceMode === "enjoy" ? "editor" : "enjoy")
+							}
+							isEnjoyMode={enjoyMode}
 						/>
+						{enjoyMode && (
+							<TracksPanel
+								api={previewApi}
+								isOpen={isTracksPanelOpen && previewApi !== null}
+								onClose={() => setTracksPanelOpen(false)}
+								side="left"
+							/>
+						)}
 					</div>
 				</div>
 			) : (
@@ -529,6 +717,13 @@ export function Editor({ showExpandSidebar, onExpandSidebar }: EditorProps) {
 						/>
 						{/* Host for CodeMirror */}
 						<div ref={editorRef} className="h-full" />
+						<InlineEditorCommandBar
+							open={inlineCommandOpen}
+							top={inlineCommandTop}
+							left={inlineCommandLeft}
+							onClose={() => setInlineCommandOpen(false)}
+							onRunCommand={runEditorCommand}
+						/>
 					</div>
 				</TooltipProvider>
 			)}

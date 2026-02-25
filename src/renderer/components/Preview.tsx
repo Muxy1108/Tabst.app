@@ -15,6 +15,8 @@ import {
 import { createPreviewSettings } from "../lib/alphatab-config";
 import { formatFullError } from "../lib/alphatab-error";
 import { loadBravuraFont, loadSoundFontFromUrl } from "../lib/assets";
+import { type AtDocConfig, parseAtDoc } from "../lib/atdoc";
+import { applyAtDocColoring } from "../lib/atdoc-coloring";
 import type { ResourceUrls } from "../lib/resourceLoaderService";
 import { getResourceUrls } from "../lib/resourceLoaderService";
 import {
@@ -42,6 +44,8 @@ export interface PreviewProps {
 	content?: string;
 	className?: string;
 	onApiChange?: (api: alphaTab.AlphaTabApi | null) => void;
+	onEnjoyToggle?: () => void;
+	isEnjoyMode?: boolean;
 }
 
 export default function Preview({
@@ -49,6 +53,8 @@ export default function Preview({
 	content,
 	className,
 	onApiChange,
+	onEnjoyToggle,
+	isEnjoyMode = false,
 }: PreviewProps) {
 	const { t } = useTranslation(["common", "errors", "print", "toolbar"]);
 	const containerRef = useRef<HTMLDivElement | null>(null);
@@ -107,10 +113,17 @@ export default function Preview({
 	const _scoreVersion = useAppStore((s) => s.scoreVersion);
 	const bumpApiInstanceId = useAppStore((s) => s.bumpApiInstanceId);
 	const bumpScoreVersion = useAppStore((s) => s.bumpScoreVersion);
+	const bumpEditorRefreshVersion = useAppStore(
+		(s) => s.bumpEditorRefreshVersion,
+	);
+	const bumpBottomBarRefreshVersion = useAppStore(
+		(s) => s.bumpBottomBarRefreshVersion,
+	);
 	const playbackSpeedRef = useRef(playbackSpeed);
 	const metronomeVolumeRef = useRef(metronomeVolume);
 	const countInEnabledRef = useRef(countInEnabled);
 	const editorHasFocusRef = useRef(editorHasFocus);
+	const atDocConfigRef = useRef<AtDocConfig>({});
 	const _savedPlayerScrollRef = useRef<{
 		scrollElement?: HTMLElement | null;
 		scrollMode?: alphaTab.ScrollMode | undefined;
@@ -242,6 +255,118 @@ export default function Preview({
 		[],
 	);
 
+	const applyAtDocHotSettings = useCallback((api: alphaTab.AlphaTabApi) => {
+		const atCfg = atDocConfigRef.current;
+		if (!atCfg.player) return;
+
+		if (typeof atCfg.player.playbackSpeed === "number") {
+			try {
+				api.playbackSpeed = atCfg.player.playbackSpeed;
+			} catch (err) {
+				console.warn("[ATDOC] Failed to apply playbackSpeed", err);
+			}
+		}
+
+		if (typeof atCfg.player.metronomeVolume === "number") {
+			try {
+				api.metronomeVolume = atCfg.player.metronomeVolume;
+			} catch (err) {
+				console.warn("[ATDOC] Failed to apply metronomeVolume", err);
+			}
+		}
+
+		if (typeof atCfg.player.countInEnabled === "boolean") {
+			try {
+				api.countInVolume = atCfg.player.countInEnabled ? 1 : 0;
+			} catch (err) {
+				console.warn("[ATDOC] Failed to apply countInEnabled", err);
+			}
+		}
+	}, []);
+
+	const syncStoreFromAtDoc = useCallback((cfg: AtDocConfig) => {
+		const store = useAppStore.getState();
+		if (typeof cfg.display?.scale === "number") {
+			const pct = Math.max(
+				10,
+				Math.min(400, Math.round(cfg.display.scale * 100)),
+			);
+			zoomRef.current = pct;
+			store.setZoomPercent(pct);
+		}
+		if (typeof cfg.player?.playbackSpeed === "number") {
+			store.setPlaybackSpeed(cfg.player.playbackSpeed);
+		}
+		if (typeof cfg.player?.metronomeVolume === "number") {
+			store.setMetronomeVolume(cfg.player.metronomeVolume);
+		}
+		if (typeof cfg.player?.countInEnabled === "boolean") {
+			store.setCountInEnabled(cfg.player.countInEnabled);
+		}
+	}, []);
+
+	const applyAtDocWarmSettings = useCallback((api: alphaTab.AlphaTabApi) => {
+		const atCfg = atDocConfigRef.current;
+		if (!api.settings) return;
+
+		let changed = false;
+		const settings = api.settings as unknown as {
+			display?: { scale?: number; layoutMode?: alphaTab.LayoutMode };
+			player?: {
+				scrollMode?: alphaTab.ScrollMode;
+				scrollSpeed?: number;
+				enableCursor?: boolean;
+				enableElementHighlighting?: boolean;
+				enableUserInteraction?: boolean;
+			};
+		};
+
+		if (atCfg.display && settings.display) {
+			if (typeof atCfg.display.scale === "number") {
+				settings.display.scale = atCfg.display.scale;
+				changed = true;
+			}
+			if (typeof atCfg.display.layoutMode === "number") {
+				settings.display.layoutMode = atCfg.display.layoutMode;
+				changed = true;
+			}
+		}
+
+		if (atCfg.player && settings.player) {
+			if (typeof atCfg.player.scrollMode === "number") {
+				settings.player.scrollMode = atCfg.player.scrollMode;
+				changed = true;
+			}
+			if (typeof atCfg.player.scrollSpeed === "number") {
+				settings.player.scrollSpeed = atCfg.player.scrollSpeed;
+				changed = true;
+			}
+			if (typeof atCfg.player.enableCursor === "boolean") {
+				settings.player.enableCursor = atCfg.player.enableCursor;
+				changed = true;
+			}
+			if (typeof atCfg.player.enableElementHighlighting === "boolean") {
+				settings.player.enableElementHighlighting =
+					atCfg.player.enableElementHighlighting;
+				changed = true;
+			}
+			if (typeof atCfg.player.enableUserInteraction === "boolean") {
+				settings.player.enableUserInteraction =
+					atCfg.player.enableUserInteraction;
+				changed = true;
+			}
+		}
+
+		if (changed) {
+			try {
+				api.updateSettings?.();
+				api.render?.();
+			} catch (err) {
+				console.warn("[ATDOC] Failed to apply warm settings", err);
+			}
+		}
+	}, []);
+
 	usePreviewBarHighlight(
 		apiRef,
 		editorCursor,
@@ -268,6 +393,18 @@ export default function Preview({
 	 */
 	const applyTracksConfig = useCallback(
 		(api: alphaTab.AlphaTabApi) => {
+			if (atDocConfigRef.current.staff) {
+				const appliedFromAtDoc = applyStaffConfig(
+					api,
+					atDocConfigRef.current.staff,
+				);
+				if (appliedFromAtDoc) {
+					trackConfigRef.current = appliedFromAtDoc;
+					setFirstStaffOptions(appliedFromAtDoc);
+					return;
+				}
+			}
+
 			// First load: try to prefer TAB (silent dry-run). If it errors, keep alphaTab default.
 			if (!trackConfigRef.current) {
 				if (tabProbeRef.current.active) return;
@@ -393,6 +530,13 @@ export default function Preview({
 				// if (cursor) cursor.classList.add("hidden");
 				// 渲染完成时回到无高亮状态（避免保留旧的黄色小节高亮导致滚动锁定）
 				useAppStore.getState().clearPlaybackHighlights();
+				useAppStore.getState().setPlaybackProgress({
+					positionTick: 0,
+					endTick:
+						typeof api.endTick === "number" ? Math.max(0, api.endTick) : 0,
+					positionMs: 0,
+					endMs: typeof api.endTime === "number" ? Math.max(0, api.endTime) : 0,
+				});
 
 				// 🆕 尝试提取乐谱的初始 BPM（以便 BPM 模式使用）
 				try {
@@ -427,6 +571,14 @@ export default function Preview({
 					// 播放停止/结束时回到无高亮状态（同时清除黄色小节高亮的来源）
 					useAppStore.getState().clearPlaybackHighlights();
 					useAppStore.getState().setPlayerIsPlaying(false);
+					useAppStore.getState().setPlaybackProgress({
+						positionTick: 0,
+						endTick:
+							typeof api.endTick === "number" ? Math.max(0, api.endTick) : 0,
+						positionMs: 0,
+						endMs:
+							typeof api.endTime === "number" ? Math.max(0, api.endTime) : 0,
+					});
 					return;
 				}
 				const barIndex = beat.voice?.bar?.index ?? 0;
@@ -453,6 +605,47 @@ export default function Preview({
 				*/
 			});
 
+			api.playerPositionChanged?.on(
+				(args: {
+					currentTick?: number;
+					endTick?: number;
+					currentTime?: number;
+					endTime?: number;
+				}) => {
+					const positionTick =
+						typeof args?.currentTick === "number"
+							? args.currentTick
+							: typeof api.tickPosition === "number"
+								? api.tickPosition
+								: 0;
+					const endTick =
+						typeof args?.endTick === "number"
+							? args.endTick
+							: typeof api.endTick === "number"
+								? api.endTick
+								: 0;
+					const positionMs =
+						typeof args?.currentTime === "number"
+							? args.currentTime
+							: typeof api.timePosition === "number"
+								? api.timePosition
+								: 0;
+					const endMs =
+						typeof args?.endTime === "number"
+							? args.endTime
+							: typeof api.endTime === "number"
+								? api.endTime
+								: 0;
+
+					useAppStore.getState().setPlaybackProgress({
+						positionTick: Math.max(0, positionTick),
+						endTick: Math.max(0, endTick),
+						positionMs: Math.max(0, positionMs),
+						endMs: Math.max(0, endMs),
+					});
+				},
+			);
+
 			// 4. 播放器完成/状态变化事件：确保 UI 与播放器同步
 			api.playerFinished?.on(() => {
 				console.info("[Preview] alphaTab player finished");
@@ -460,6 +653,12 @@ export default function Preview({
 				// 这里强制回到无高亮状态，避免编辑器高亮/滚动锁死在末尾
 				useAppStore.getState().clearPlaybackHighlights();
 				useAppStore.getState().setPlayerIsPlaying(false);
+				useAppStore.getState().setPlaybackProgress({
+					positionTick: 0,
+					endTick: typeof api.endTick === "number" ? api.endTick : 0,
+					positionMs: 0,
+					endMs: typeof api.endTime === "number" ? api.endTime : 0,
+				});
 			});
 
 			api.playerStateChanged?.on((e: { state: number; stopped?: boolean }) => {
@@ -468,6 +667,12 @@ export default function Preview({
 					// stopped 明确表示停止（而不是暂停），停止时清除播放相关高亮
 					useAppStore.getState().clearPlaybackHighlights();
 					useAppStore.getState().setPlayerIsPlaying(false);
+					useAppStore.getState().setPlaybackProgress({
+						positionTick: 0,
+						endTick: typeof api.endTick === "number" ? api.endTick : 0,
+						positionMs: 0,
+						endMs: typeof api.endTime === "number" ? api.endTime : 0,
+					});
 				} else if (e?.state === 1 /* Playing */) {
 					useAppStore.getState().setPlayerIsPlaying(true);
 				} else {
@@ -636,11 +841,19 @@ export default function Preview({
 						}
 					},
 					refresh: () => {
+						bumpEditorRefreshVersion();
+						bumpBottomBarRefreshVersion();
 						// 1. 先停止播放并清除所有状态
 						api.stop?.();
 						useAppStore.getState().clearScoreSelection();
 						useAppStore.getState().clearPlaybackHighlights();
 						useAppStore.getState().setPlayerIsPlaying(false);
+						useAppStore.getState().setPlaybackProgress({
+							positionTick: 0,
+							endTick: typeof api.endTick === "number" ? api.endTick : 0,
+							positionMs: 0,
+							endMs: typeof api.endTime === "number" ? api.endTime : 0,
+						});
 
 						// 2. 清除编辑器光标相关的 refs
 						isHighlightFromEditorCursorRef.current = false;
@@ -696,6 +909,35 @@ export default function Preview({
 							api.countInVolume = enabled ? 1 : 0;
 						} catch (err) {
 							console.error("Failed to set count-in:", err);
+						}
+					},
+					seekPlaybackPosition: (tick: number) => {
+						if (!Number.isFinite(tick)) return;
+						const maxTick =
+							typeof api.endTick === "number" && api.endTick > 0
+								? api.endTick
+								: tick;
+						const targetTick = Math.max(0, Math.min(maxTick, tick));
+						try {
+							api.tickPosition = targetTick;
+							const endTick =
+								typeof api.endTick === "number" ? Math.max(0, api.endTick) : 0;
+							const endMs =
+								typeof api.endTime === "number" ? Math.max(0, api.endTime) : 0;
+							const ratio = endTick > 0 ? targetTick / endTick : 0;
+							const fallbackPositionMs = endMs > 0 ? ratio * endMs : 0;
+							const positionMs =
+								typeof api.timePosition === "number"
+									? Math.max(0, api.timePosition)
+									: fallbackPositionMs;
+							useAppStore.getState().setPlaybackProgress({
+								positionTick: targetTick,
+								endTick,
+								positionMs,
+								endMs,
+							});
+						} catch (err) {
+							console.error("Failed to seek playback position:", err);
 						}
 					},
 					applyZoom: (pct: number) => applyZoom(pct),
@@ -857,8 +1099,19 @@ export default function Preview({
 								err,
 							);
 						}
-						const currentContent = latestContentRef.current ?? "";
+						const currentContent = parseAtDoc(
+							latestContentRef.current ?? "",
+						).cleanContent;
 						onScoreLoadedMatch(score, currentContent);
+						if (apiRef.current) {
+							applyAtDocWarmSettings(apiRef.current);
+							applyAtDocHotSettings(apiRef.current);
+							applyAtDocColoring(
+								apiRef.current,
+								atDocConfigRef.current,
+								(message) => console.warn(message),
+							);
+						}
 						// 🆕 统一调用 applyTracksConfig，无论是首次还是重建
 						if (apiRef.current) applyTracksConfig(apiRef.current);
 						// 🆕 如果有挂起的小节号高亮请求，scoreLoaded 后执行
@@ -878,6 +1131,13 @@ export default function Preview({
 
 		const initAlphaTab = async () => {
 			try {
+				const parsedAtDoc = parseAtDoc(latestContentRef.current ?? "");
+				atDocConfigRef.current = parsedAtDoc.config;
+				syncStoreFromAtDoc(parsedAtDoc.config);
+				for (const warning of parsedAtDoc.warnings) {
+					console.warn(`[ATDOC:${warning.line}] ${warning.message}`);
+				}
+
 				// 1. 获取所有资源 URL（自动适配 dev 和打包环境）
 				const urls = await getResourceUrls();
 				const el = containerRef.current as HTMLElement;
@@ -949,7 +1209,9 @@ export default function Preview({
 									}
 
 									// 保存当前的乐谱内容（使用最新值，避免闭包过期）
-									const currentContent = latestContentRef.current;
+									const currentContent = parseAtDoc(
+										latestContentRef.current,
+									).cleanContent;
 
 									// 销毁旧的 API
 									apiRef.current?.destroy();
@@ -1034,8 +1296,9 @@ export default function Preview({
 						// Could not load soundfont (this is optional)
 					}
 				}
-				const initialContent =
+				const initialContentRaw =
 					pendingContentRef.current ?? latestContentRef.current;
+				const initialContent = parseAtDoc(initialContentRaw).cleanContent;
 				pendingContentRef.current = null;
 
 				if (apiRef.current && initialContent) {
@@ -1093,12 +1356,17 @@ export default function Preview({
 		applyEditorBarNumberColor,
 		bumpScoreVersion,
 		bumpApiInstanceId,
+		bumpEditorRefreshVersion,
+		bumpBottomBarRefreshVersion,
 		emitApiChange,
 		sanitizeAllBarStyles,
 		applyThemeColorsToPreviousBars,
 		scheduleTexTimeout,
 		markLoadAsUserContent,
 		clearTexTimeout,
+		applyAtDocHotSettings,
+		applyAtDocWarmSettings,
+		syncStoreFromAtDoc,
 		onErrorRecovery,
 		onScoreLoadedMatch,
 		setParseError,
@@ -1116,7 +1384,14 @@ export default function Preview({
 		}
 
 		// Apply any pending content first
-		const contentToApply = pendingContentRef.current ?? content ?? "";
+		const contentToApplyRaw = pendingContentRef.current ?? content ?? "";
+		const parsedAtDoc = parseAtDoc(contentToApplyRaw);
+		atDocConfigRef.current = parsedAtDoc.config;
+		syncStoreFromAtDoc(parsedAtDoc.config);
+		for (const warning of parsedAtDoc.warnings) {
+			console.warn(`[ATDOC:${warning.line}] ${warning.message}`);
+		}
+		const contentToApply = parsedAtDoc.cleanContent;
 		pendingContentRef.current = null;
 
 		useAppStore.getState().clearScoreSelection();
@@ -1150,6 +1425,7 @@ export default function Preview({
 		scheduleTexTimeout,
 		markLoadAsUserContent,
 		clearTexTimeout,
+		syncStoreFromAtDoc,
 		setParseError,
 	]);
 
@@ -1212,6 +1488,8 @@ export default function Preview({
 									fileName={fileName}
 									content={content}
 									onPrintClick={() => setShowPrintPreview(true)}
+									onEnjoyToggle={onEnjoyToggle}
+									isEnjoyMode={isEnjoyMode}
 									t={t}
 								/>
 							}

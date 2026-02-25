@@ -6,7 +6,7 @@
  */
 
 import type * as AlphaTab from "@coderline/alphatab";
-import { Check, Eye, EyeOff, Layers, Music, X } from "lucide-react";
+import { Check, Eye, EyeOff, Layers, Music, Volume2, X } from "lucide-react";
 import {
 	type ReactNode,
 	useCallback,
@@ -44,6 +44,7 @@ interface TrackConfig {
 	index: number;
 	name: string;
 	isSelected: boolean;
+	volumePercent: number;
 	staves: StaffConfig[];
 }
 
@@ -54,6 +55,7 @@ export interface TracksPanelProps {
 	isOpen: boolean;
 	/** Callback to close panel */
 	onClose: () => void;
+	side?: "left" | "right";
 	/** Callback when track selection changes */
 	onTracksChange?: (tracks: AlphaTab.model.Track[]) => void;
 }
@@ -65,10 +67,31 @@ export function TracksPanel({
 	api,
 	isOpen,
 	onClose,
+	side = "right",
 	onTracksChange,
 }: TracksPanelProps) {
 	const { t } = useTranslation("print");
 	const [trackConfigs, setTrackConfigs] = useState<TrackConfig[]>([]);
+
+	const applyTrackVolume = useCallback(
+		(track: AlphaTab.model.Track, volumePercent: number) => {
+			if (!api) return;
+			const clamped = Math.max(0, Math.min(200, volumePercent));
+			api.changeTrackVolume([track], clamped / 100);
+		},
+		[api],
+	);
+
+	const applyAllTrackVolumes = useCallback(
+		(configs: TrackConfig[], score: AlphaTab.model.Score) => {
+			configs.forEach((cfg) => {
+				const track = score.tracks.find((t) => t.index === cfg.index);
+				if (!track) return;
+				applyTrackVolume(track, cfg.volumePercent);
+			});
+		},
+		[applyTrackVolume],
+	);
 
 	// 订阅 store 的 firstStaffOptions 以保持同步
 	const firstStaffOptions = useAppStore((s) => s.firstStaffOptions);
@@ -89,6 +112,7 @@ export function TracksPanel({
 			index: track.index,
 			name: track.name || `Track ${track.index + 1}`,
 			isSelected: selectedIndices.has(track.index),
+			volumePercent: 100,
 			staves: track.staves.map((staff, staffIdx) => ({
 				staffIndex:
 					typeof (staff as AlphaTab.model.Staff).index === "number"
@@ -102,7 +126,8 @@ export function TracksPanel({
 		}));
 
 		setTrackConfigs(configs);
-	}, [api, api?.score]);
+		applyAllTrackVolumes(configs, api.score);
+	}, [api, api?.score, applyAllTrackVolumes]);
 
 	// 监听 store 的 firstStaffOptions 变化，同步到本地状态（来自底栏 StaffControls 的更改）
 	useEffect(() => {
@@ -195,6 +220,7 @@ export function TracksPanel({
 
 				// 更新 alphaTab 渲染
 				api.renderTracks(selectedTracks);
+				applyAllTrackVolumes(newConfigs, score);
 
 				// 通知父组件
 				onTracksChange?.(selectedTracks);
@@ -202,7 +228,7 @@ export function TracksPanel({
 				return newConfigs;
 			});
 		},
-		[api, onTracksChange],
+		[api, applyAllTrackVolumes, onTracksChange],
 	);
 
 	// 全选音轨
@@ -236,11 +262,12 @@ export function TracksPanel({
 			});
 
 			api.renderTracks(allTracks);
+			applyAllTrackVolumes(newConfigs, score);
 			onTracksChange?.(allTracks);
 
 			return newConfigs;
 		});
-	}, [api, onTracksChange]);
+	}, [api, applyAllTrackVolumes, onTracksChange]);
 
 	// 取消全选（保留第一个）
 	const deselectAllTracks = useCallback(() => {
@@ -274,11 +301,34 @@ export function TracksPanel({
 			}
 
 			api.renderTracks([firstTrack]);
+			applyAllTrackVolumes(newConfigs, score);
 			onTracksChange?.([firstTrack]);
 
 			return newConfigs;
 		});
-	}, [api, onTracksChange]);
+	}, [api, applyAllTrackVolumes, onTracksChange]);
+
+	const setTrackVolume = useCallback(
+		(trackIndex: number, volumePercent: number) => {
+			const score = api?.score;
+			if (!score) return;
+
+			setTrackConfigs((prev) => {
+				const clamped = Math.max(0, Math.min(200, volumePercent));
+				const next = prev.map((cfg) =>
+					cfg.index === trackIndex ? { ...cfg, volumePercent: clamped } : cfg,
+				);
+
+				const track = score.tracks.find((t) => t.index === trackIndex);
+				if (track) {
+					applyTrackVolume(track, clamped);
+				}
+
+				return next;
+			});
+		},
+		[api, applyTrackVolume],
+	);
 
 	// 同步第一个音轨的第一个谱表配置到 store
 	const syncFirstStaffToStore = useCallback(
@@ -354,11 +404,12 @@ export function TracksPanel({
 
 				// 触发重新渲染
 				score && api.render();
+				applyAllTrackVolumes(newConfigs, score);
 
 				return newConfigs;
 			});
 		},
-		[api, syncFirstStaffToStore],
+		[api, applyAllTrackVolumes, syncFirstStaffToStore],
 	);
 
 	// 计算选中数量
@@ -369,9 +420,15 @@ export function TracksPanel({
 
 	return (
 		<TooltipProvider delayDuration={200}>
-			<div className="w-64 border-l border-border bg-card flex flex-col h-full shrink-0 shadow-lg absolute right-0 top-0 bottom-0 z-[2001]">
+			<div
+				className={`w-64 bg-card flex flex-col h-full shrink-0 shadow-lg absolute top-0 bottom-0 z-[2001] ${
+					side === "left"
+						? "left-0 border-r border-border"
+						: "right-0 border-l border-border"
+				}`}
+			>
 				{/* Header */}
-				<div className="h-10 border-b border-border flex items-center justify-between px-3 shrink-0">
+				<div className="h-9 border-b border-border flex items-center justify-between px-3 shrink-0">
 					<div className="flex items-center gap-2">
 						<Layers className="h-4 w-4" />
 						<span className="text-sm font-medium">{t("trackSelect")}</span>
@@ -386,7 +443,7 @@ export function TracksPanel({
 								<X className="h-4 w-4" />
 							</button>
 						</TooltipTrigger>
-						<TooltipContent side="left">
+						<TooltipContent side={side === "left" ? "right" : "left"}>
 							<p>{t("close")}</p>
 						</TooltipContent>
 					</Tooltip>
@@ -443,6 +500,7 @@ export function TracksPanel({
 									key={config.index}
 									config={config}
 									onToggleSelection={toggleTrackSelection}
+									onSetTrackVolume={setTrackVolume}
 									onToggleStaffOption={toggleStaffOption}
 								/>
 							))}
@@ -475,6 +533,7 @@ export function TracksPanel({
 interface TrackItemProps {
 	config: TrackConfig;
 	onToggleSelection: (trackIndex: number) => void;
+	onSetTrackVolume: (trackIndex: number, volumePercent: number) => void;
 	onToggleStaffOption: (
 		trackIndex: number,
 		staffIndex: number,
@@ -550,9 +609,11 @@ function TrackStaffRow({
 function TrackItem({
 	config,
 	onToggleSelection,
+	onSetTrackVolume,
 	onToggleStaffOption,
 }: TrackItemProps) {
-	const { index, name, isSelected, staves } = config;
+	const { t } = useTranslation("print");
+	const { index, name, isSelected, staves, volumePercent } = config;
 
 	return (
 		<div
@@ -597,6 +658,30 @@ function TrackItem({
 					{name}
 				</span>
 			</button>
+			<div className="px-2 pb-1">
+				<div className="flex items-center gap-2 rounded-md bg-muted/40 px-2 py-1.5">
+					<Volume2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+					<input
+						type="range"
+						min={0}
+						max={200}
+						step={1}
+						value={volumePercent}
+						onChange={(event) => {
+							event.stopPropagation();
+							const value = Number.parseInt(event.currentTarget.value, 10);
+							if (Number.isNaN(value)) return;
+							onSetTrackVolume(index, value);
+						}}
+						onClick={(event) => event.stopPropagation()}
+						aria-label={t("trackVolume", { track: name })}
+						className="h-1.5 w-full cursor-pointer accent-primary"
+					/>
+					<span className="w-10 text-right text-[11px] tabular-nums text-muted-foreground shrink-0">
+						{t("trackVolumeValue", { value: volumePercent })}
+					</span>
+				</div>
+			</div>
 			{/* 谱表显示选项 */}
 			{isSelected && staves.length > 0 && (
 				<div className="px-2 pb-2 pt-1 space-y-1">
