@@ -140,7 +140,7 @@ export async function getAlphaTexHighlight() {
 		{ tag: tags.tagName, color: "#22863a" },
 		{ tag: tags.attributeName, color: "#6f42c1" },
 		{ tag: tags.variableName, color: "#24292e" },
-		{ tag: tags.bracket, color: "#24292e" },
+		{ tag: tags.bracket, color: "#e6f1ff9b" },
 	]);
 
 	highlightExtension = [alphaTexParser, syntaxHighlighting(alphaTexTheme)];
