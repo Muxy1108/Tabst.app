@@ -17,6 +17,7 @@ export interface RepoPreferences {
 	disabledCommandIds?: string[];
 	pinnedCommandIds?: string[];
 	commandMruIds?: string[];
+	templateFilePaths?: string[];
 	commandShortcuts?: Record<string, string[]>;
 	staffOptions?: StaffDisplayOptions;
 	zoomPercent?: number;

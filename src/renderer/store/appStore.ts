@@ -4,6 +4,10 @@ import { extractAtDocFileMeta } from "../lib/atdoc";
 import { loadGlobalSettings, saveGlobalSettings } from "../lib/global-settings";
 import { sanitizeShortcutList } from "../lib/shortcut-utils";
 import type { StaffDisplayOptions } from "../lib/staff-config";
+import {
+	isTemplateCandidatePath,
+	sanitizeTemplatePathList,
+} from "../lib/template-utils";
 import type { TutorialAudience } from "../lib/tutorial-loader";
 import type {
 	GitDiffResult,
@@ -306,6 +310,10 @@ interface AppState {
 	setCommandPinned: (commandId: string, pinned: boolean) => void;
 	commandMruIds: string[];
 	recordCommandUsage: (commandId: string) => void;
+	templateFilePaths: string[];
+	setFileTemplate: (filePath: string, enabled: boolean) => void;
+	toggleFileTemplate: (filePath: string) => void;
+	remapTemplatePaths: (oldPrefix: string, newPrefix: string) => void;
 	commandShortcuts: Record<string, string[]>;
 	setCommandShortcuts: (commandId: string, shortcuts: string[]) => void;
 	resetCommandShortcuts: (commandId: string) => void;
@@ -636,6 +644,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 						activeRepoId: id,
 						fileTree: result.nodes,
 						files: flattenFileNodes(result.nodes),
+						templateFilePaths: [],
 						commandShortcuts: {},
 						activeFileId: null,
 						scoreSelection: null,
@@ -726,6 +735,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 								commandMruIds: prefs.commandMruIds
 									.filter((id): id is string => typeof id === "string")
 									.slice(0, 30),
+							});
+						}
+						if (Array.isArray(prefs.templateFilePaths)) {
+							set({
+								templateFilePaths: sanitizeTemplatePathList(
+									prefs.templateFilePaths.filter(
+										(path): path is string => typeof path === "string",
+									),
+								),
 							});
 						}
 						if (
@@ -1418,6 +1436,65 @@ export const useAppStore = create<AppState>((set, get) => ({
 		});
 	},
 
+	templateFilePaths: [],
+	setFileTemplate: (filePath, enabled) => {
+		const normalizedPath = normalizePathForCompare(filePath);
+		if (!normalizedPath) return;
+		if (enabled && !isTemplateCandidatePath(normalizedPath)) return;
+
+		set((state) => {
+			const exists = state.templateFilePaths.includes(normalizedPath);
+			const next = sanitizeTemplatePathList(
+				enabled
+					? exists
+						? state.templateFilePaths
+						: [...state.templateFilePaths, normalizedPath]
+					: exists
+						? state.templateFilePaths.filter((path) => path !== normalizedPath)
+						: state.templateFilePaths,
+			);
+
+			if (isSameStringList(state.templateFilePaths, next)) return {};
+			void mergeAndSaveWorkspacePreferences({ templateFilePaths: next });
+			return { templateFilePaths: next };
+		});
+	},
+	toggleFileTemplate: (filePath) => {
+		const normalizedPath = normalizePathForCompare(filePath);
+		if (!normalizedPath) return;
+
+		set((state) => {
+			const exists = state.templateFilePaths.includes(normalizedPath);
+			const next = sanitizeTemplatePathList(
+				exists
+					? state.templateFilePaths.filter((path) => path !== normalizedPath)
+					: isTemplateCandidatePath(normalizedPath)
+						? [...state.templateFilePaths, normalizedPath]
+						: state.templateFilePaths,
+			);
+
+			if (isSameStringList(state.templateFilePaths, next)) return {};
+			void mergeAndSaveWorkspacePreferences({ templateFilePaths: next });
+			return { templateFilePaths: next };
+		});
+	},
+	remapTemplatePaths: (oldPrefix, newPrefix) => {
+		const normalizedOldPrefix = normalizePathForCompare(oldPrefix);
+		const normalizedNewPrefix = normalizePathForCompare(newPrefix);
+		if (!normalizedOldPrefix || !normalizedNewPrefix) return;
+
+		set((state) => {
+			const next = sanitizeTemplatePathList(
+				state.templateFilePaths.map((path) =>
+					replacePathPrefix(path, normalizedOldPrefix, normalizedNewPrefix),
+				),
+			);
+
+			if (isSameStringList(state.templateFilePaths, next)) return {};
+			void mergeAndSaveWorkspacePreferences({ templateFilePaths: next });
+			return { templateFilePaths: next };
+		});
+	},
 	commandShortcuts: {},
 	setCommandShortcuts: (commandId, shortcuts) => {
 		const normalized = sanitizeShortcutList(shortcuts);
@@ -1520,6 +1597,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
 	removeFile: (id) => {
 		set((state) => {
+			const removedFile = state.files.find((file) => file.id === id);
+			const removedPath = removedFile
+				? normalizePathForCompare(removedFile.path)
+				: null;
 			const newFiles = state.files.filter((f) => f.id !== id);
 			const newActiveId =
 				state.activeFileId === id
@@ -1527,7 +1608,23 @@ export const useAppStore = create<AppState>((set, get) => ({
 						? newFiles[0].id
 						: null
 					: state.activeFileId;
-			return { files: newFiles, activeFileId: newActiveId };
+			const nextTemplatePaths = sanitizeTemplatePathList(
+				removedPath
+					? state.templateFilePaths.filter((path) => path !== removedPath)
+					: state.templateFilePaths,
+			);
+
+			if (nextTemplatePaths.length !== state.templateFilePaths.length) {
+				void mergeAndSaveWorkspacePreferences({
+					templateFilePaths: nextTemplatePaths,
+				});
+			}
+
+			return {
+				files: newFiles,
+				activeFileId: newActiveId,
+				templateFilePaths: nextTemplatePaths,
+			};
 		});
 		scheduleSaveAppState();
 	},
@@ -1582,11 +1679,29 @@ export const useAppStore = create<AppState>((set, get) => ({
 						: state.activeFileId;
 
 				const newTree = renameNodeInTree(state.fileTree, oldPath, newPath);
+				const nextTemplatePaths = sanitizeTemplatePathList(
+					state.templateFilePaths.map((path) =>
+						replacePathPrefix(path, oldPath, newPath),
+					),
+				);
+				const templatePathsChanged = !isSameStringList(
+					nextTemplatePaths,
+					state.templateFilePaths,
+				);
+
+				if (templatePathsChanged) {
+					void mergeAndSaveWorkspacePreferences({
+						templateFilePaths: nextTemplatePaths,
+					});
+				}
 
 				return {
 					files: newFiles,
 					activeFileId: newActiveFileId,
 					fileTree: newTree,
+					templateFilePaths: templatePathsChanged
+						? nextTemplatePaths
+						: state.templateFilePaths,
 				};
 			});
 			scheduleSaveAppState();

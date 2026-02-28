@@ -8,6 +8,7 @@ import { CommandsPage } from "./settings/CommandsPage";
 import { PlaybackPage } from "./settings/PlaybackPage";
 import { RoadmapPage } from "./settings/RoadmapPage";
 import { ShortcutsPage } from "./settings/ShortcutsPage";
+import { TemplatesPage } from "./settings/TemplatesPage";
 import { UpdatesPage } from "./settings/UpdatesPage";
 import { defaultSettingsPages } from "./settings-pages";
 import TopBar from "./TopBar";
@@ -58,6 +59,8 @@ export default function SettingsView({
 				return <PlaybackPage />;
 			case "commands":
 				return <CommandsPage />;
+			case "templates":
+				return <TemplatesPage />;
 			case "shortcuts":
 				return <ShortcutsPage />;
 			case "updates":

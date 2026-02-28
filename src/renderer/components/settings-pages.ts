@@ -26,6 +26,11 @@ export const defaultSettingsPages: SettingsPage[] = [
 		description: "命令开关与可用性配置",
 	},
 	{
+		id: "templates",
+		title: "模板",
+		description: "管理可插入和可复用的文件模板",
+	},
+	{
 		id: "shortcuts",
 		title: "快捷键",
 		description: "快捷键绑定与冲突管理",
