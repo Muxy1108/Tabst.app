@@ -68,6 +68,7 @@ jobs:
             assets/Bravura.woff2 \
             assets/sonivox.sf3 \
             assets/alphaTab.worker.mjs \
+            assets/alphaTab.worklet.mjs \
             assets/alphaTab.core.mjs
           do
             URL="${PAGE_URL%/}/$asset"
