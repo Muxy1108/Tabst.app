@@ -9,7 +9,7 @@ const groups = {
 	main: ["./src/main"],
 	render: ["./src/renderer"],
 	doc: ["./docs"],
-	config: ["./Agents.md", "./biome.json", "./package.json"],
+	config: ["./AGENTS.md", "./biome.json", "./package.json"],
 };
 
 function normalizeRel(p) {

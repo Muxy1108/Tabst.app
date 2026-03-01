@@ -81,7 +81,7 @@ mix:main ./src/main
 mix:render ./src/renderer
 
 mix:doc ./docs
-mix:config ./Agents.md ./biome.json ./package.json
+mix:config ./AGENTS.md ./biome.json ./package.json
 
 使用说明：
 
@@ -102,6 +102,6 @@ pnpm mix            # 合并 main+render+doc+config 到 dist/codemix.md
 pnpm mix:main       # 合并 ./src/main 到 dist/codemix.md
 pnpm mix:render     # 合并 ./src/renderer 到 dist/codemix.md
 pnpm mix:doc        # 合并 ./docs 到 dist/codemix.md
-pnpm mix:config     # 合并 Agents.md/biome.json/package.json
+pnpm mix:config     # 合并 AGENTS.md/biome.json/package.json
 pnpm mix --out ./dist/share.md   # 指定输出文件
 ```
