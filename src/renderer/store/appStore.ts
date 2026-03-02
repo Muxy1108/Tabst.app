@@ -231,6 +231,20 @@ export interface CustomPlayerConfig {
 	components: PlayerComponentConfig[];
 }
 
+export interface PlayerControls {
+	play?: () => void;
+	pause?: () => void;
+	stop?: () => void;
+	refresh?: () => void;
+	seekPlaybackPosition?: (tick: number) => void;
+	applyZoom?: (percent: number) => void;
+	applyPlaybackSpeed?: (speed: number) => void;
+	setMasterVolume?: (volume: number) => void;
+	setMetronomeVolume?: (volume: number) => void;
+	setCountInEnabled?: (enabled: boolean) => void;
+	setScoreTracksMuted?: (muted: boolean) => void;
+}
+
 interface AppState {
 	// ===== Repo 管理 =====
 	repos: Repo[];
@@ -282,18 +296,8 @@ interface AppState {
 	editorHasFocus: boolean;
 	setEditorHasFocus: (hasFocus: boolean) => void;
 	// 🆕 Player UI / remote controls
-	playerControls: {
-		play?: () => void;
-		pause?: () => void;
-		stop?: () => void;
-		refresh?: () => void;
-		seekPlaybackPosition?: (tick: number) => void;
-		applyZoom?: (percent: number) => void;
-		applyPlaybackSpeed?: (speed: number) => void;
-		setMetronomeVolume?: (volume: number) => void;
-		setCountInEnabled?: (enabled: boolean) => void;
-	} | null;
-	registerPlayerControls: (controls: NonNullable<object>) => void;
+	playerControls: PlayerControls | null;
+	registerPlayerControls: (controls: PlayerControls) => void;
 	unregisterPlayerControls: () => void;
 	playerIsPlaying: boolean;
 	setPlayerIsPlaying: (v: boolean) => void;
@@ -301,6 +305,10 @@ interface AppState {
 	setZoomPercent: (v: number) => void;
 	playbackSpeed: number;
 	setPlaybackSpeed: (v: number) => void;
+	masterVolume: number;
+	setMasterVolume: (v: number) => void;
+	metronomeOnlyMode: boolean;
+	setMetronomeOnlyMode: (v: boolean) => void;
 	/** 播放模式：true= BPM 模式, false = 倍速模式 */
 	playbackBpmMode: boolean;
 	setPlaybackBpmMode: (v: boolean) => void;
@@ -772,6 +780,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 							set({ playbackSpeed: prefs.playbackSpeed });
 							get().playerControls?.applyPlaybackSpeed?.(prefs.playbackSpeed);
 						}
+						if (typeof prefs.masterVolume === "number") {
+							set({ masterVolume: prefs.masterVolume });
+							get().playerControls?.setMasterVolume?.(prefs.masterVolume);
+						}
 						if (typeof prefs.playbackBpmMode === "boolean") {
 							set({ playbackBpmMode: prefs.playbackBpmMode });
 						}
@@ -982,6 +994,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 	setPlaybackSpeed: (v) => {
 		set({ playbackSpeed: v });
 		void mergeAndSaveWorkspacePreferences({ playbackSpeed: v });
+	},
+	masterVolume: 1.0,
+	setMasterVolume: (v) => {
+		const clamped = Math.max(0, Math.min(1, v));
+		set({ masterVolume: clamped });
+		void mergeAndSaveWorkspacePreferences({ masterVolume: clamped });
+	},
+	metronomeOnlyMode: false,
+	setMetronomeOnlyMode: (v) => {
+		set({ metronomeOnlyMode: v });
 	},
 
 	// 默认为 BPM 模式

@@ -42,6 +42,10 @@ import { loadBravuraFont, loadSoundFontFromUrl } from "../lib/assets";
 import { type AtDocConfig, parseAtDoc } from "../lib/atdoc";
 import { applyAtDocColoring } from "../lib/atdoc-coloring";
 import {
+	captureTrackMuteState,
+	splitTracksByMuteState,
+} from "../lib/player-audio";
+import {
 	PREVIEW_COMMAND_EVENT,
 	type PreviewCommandId,
 } from "../lib/preview-command-events";
@@ -141,6 +145,8 @@ export default function Preview({
 		(s) => s.toggleFirstStaffOption,
 	);
 	const playbackSpeed = useAppStore((s) => s.playbackSpeed);
+	const masterVolume = useAppStore((s) => s.masterVolume);
+	const metronomeOnlyMode = useAppStore((s) => s.metronomeOnlyMode);
 	const metronomeVolume = useAppStore((s) => s.metronomeVolume);
 	const countInEnabled = useAppStore((s) => s.countInEnabled);
 	const editorHasFocus = useAppStore((s) => s.editorHasFocus);
@@ -154,6 +160,8 @@ export default function Preview({
 		(s) => s.bumpBottomBarRefreshVersion,
 	);
 	const playbackSpeedRef = useRef(playbackSpeed);
+	const masterVolumeRef = useRef(masterVolume);
+	const metronomeOnlyModeRef = useRef(metronomeOnlyMode);
 	const metronomeVolumeRef = useRef(metronomeVolume);
 	const countInEnabledRef = useRef(countInEnabled);
 	const editorHasFocusRef = useRef(editorHasFocus);
@@ -172,8 +180,10 @@ export default function Preview({
 	const listenerTeardownsRef = useRef<Array<() => void>>([]);
 	const lastRebuildAtRef = useRef(0);
 	const lastAppliedPlaybackSpeedRef = useRef<number | null>(null);
+	const lastAppliedMasterVolumeRef = useRef<number | null>(null);
 	const lastAppliedMetronomeVolumeRef = useRef<number | null>(null);
 	const lastAppliedCountInRef = useRef<number | null>(null);
+	const trackMuteSnapshotRef = useRef<Map<number, boolean> | null>(null);
 	const lastAppliedTexContentRef = useRef<string | null>(null);
 	const lastPlaybackProgressRef = useRef<{
 		positionTick: number;
@@ -383,6 +393,19 @@ export default function Preview({
 	}, [playbackSpeed]);
 
 	useEffect(() => {
+		masterVolumeRef.current = masterVolume;
+		const api = apiRef.current;
+		if (!api) return;
+		if (lastAppliedMasterVolumeRef.current === masterVolume) return;
+		try {
+			api.masterVolume = masterVolume;
+			lastAppliedMasterVolumeRef.current = masterVolume;
+		} catch {
+			// Failed to apply master volume
+		}
+	}, [masterVolume]);
+
+	useEffect(() => {
 		metronomeVolumeRef.current = metronomeVolume;
 		const api = apiRef.current;
 		if (!api) return;
@@ -443,6 +466,45 @@ export default function Preview({
 		}
 	}, []);
 
+	const applyScoreTracksMuted = useCallback(
+		(api: alphaTab.AlphaTabApi, muted: boolean) => {
+			const scoreTracks = api.score?.tracks ?? [];
+			if (scoreTracks.length === 0) return;
+
+			try {
+				if (muted) {
+					trackMuteSnapshotRef.current = captureTrackMuteState(scoreTracks);
+					api.changeTrackMute(scoreTracks, true);
+					return;
+				}
+
+				const snapshot = trackMuteSnapshotRef.current;
+				const { mutedTracks, unmutedTracks } = splitTracksByMuteState(
+					scoreTracks,
+					snapshot,
+				);
+
+				if (mutedTracks.length > 0) {
+					api.changeTrackMute(mutedTracks, true);
+				}
+				if (unmutedTracks.length > 0) {
+					api.changeTrackMute(unmutedTracks, false);
+				}
+				trackMuteSnapshotRef.current = null;
+			} catch (err) {
+				console.error("[Preview] Failed to apply score track mute state:", err);
+			}
+		},
+		[],
+	);
+
+	useEffect(() => {
+		metronomeOnlyModeRef.current = metronomeOnlyMode;
+		const api = apiRef.current;
+		if (!api) return;
+		applyScoreTracksMuted(api, metronomeOnlyMode);
+	}, [metronomeOnlyMode, applyScoreTracksMuted]);
+
 	// Bar highlight: use lib and keep lastColoredBars in ref for callbacks
 	const sanitizeAllBarStyles = useCallback(
 		(api: alphaTab.AlphaTabApi) => sanitizeAllBarStylesLib(api),
@@ -482,6 +544,14 @@ export default function Preview({
 			}
 		}
 
+		if (typeof atCfg.player.volume === "number") {
+			try {
+				api.masterVolume = atCfg.player.volume;
+			} catch (err) {
+				console.warn("[ATDOC] Failed to apply volume", err);
+			}
+		}
+
 		if (typeof atCfg.player.metronomeVolume === "number") {
 			try {
 				api.metronomeVolume = atCfg.player.metronomeVolume;
@@ -499,6 +569,43 @@ export default function Preview({
 		}
 	}, []);
 
+	const applyAtDocTrackMixSettings = useCallback(
+		(api: alphaTab.AlphaTabApi) => {
+			const playerCfg = atDocConfigRef.current.player;
+			if (!playerCfg) return;
+			const hasMuteConfig = Array.isArray(playerCfg.muteTracks);
+			const hasSoloConfig = Array.isArray(playerCfg.soloTracks);
+			if (!hasMuteConfig && !hasSoloConfig) return;
+
+			const allTracks = api.score?.tracks ?? [];
+			if (allTracks.length === 0) return;
+
+			const trackByIndex = new Map(
+				allTracks.map((track) => [track.index, track]),
+			);
+			const muteTracks = (playerCfg.muteTracks ?? [])
+				.map((index) => trackByIndex.get(index))
+				.filter((track): track is alphaTab.model.Track => Boolean(track));
+			const soloTracks = (playerCfg.soloTracks ?? [])
+				.map((index) => trackByIndex.get(index))
+				.filter((track): track is alphaTab.model.Track => Boolean(track));
+
+			try {
+				api.changeTrackSolo(allTracks, false);
+				api.changeTrackMute(allTracks, false);
+				if (muteTracks.length > 0) {
+					api.changeTrackMute(muteTracks, true);
+				}
+				if (soloTracks.length > 0) {
+					api.changeTrackSolo(soloTracks, true);
+				}
+			} catch (err) {
+				console.warn("[ATDOC] Failed to apply track mute/solo directives", err);
+			}
+		},
+		[],
+	);
+
 	const syncStoreFromAtDoc = useCallback((cfg: AtDocConfig) => {
 		const store = useAppStore.getState();
 		if (typeof cfg.display?.scale === "number") {
@@ -511,6 +618,9 @@ export default function Preview({
 		}
 		if (typeof cfg.player?.playbackSpeed === "number") {
 			store.setPlaybackSpeed(cfg.player.playbackSpeed);
+		}
+		if (typeof cfg.player?.volume === "number") {
+			store.setMasterVolume(cfg.player.volume);
 		}
 		if (typeof cfg.player?.metronomeVolume === "number") {
 			store.setMetronomeVolume(cfg.player.metronomeVolume);
@@ -760,7 +870,7 @@ export default function Preview({
 				subscribe(api.soundFontLoaded, () => {
 					console.info("[Preview] alphaTab soundfont loaded");
 					try {
-						if (api) api.masterVolume = 1.0;
+						if (api) api.masterVolume = masterVolumeRef.current;
 					} catch (_) {
 						// ignore if property not available
 					}
@@ -1110,6 +1220,15 @@ export default function Preview({
 							console.error("Failed to set playback speed:", err);
 						}
 					},
+					setMasterVolume: (volume: number) => {
+						const clamped = Math.max(0, Math.min(1, volume));
+						try {
+							api.masterVolume = clamped;
+							lastAppliedMasterVolumeRef.current = clamped;
+						} catch (err) {
+							console.error("Failed to set master volume:", err);
+						}
+					},
 					setMetronomeVolume: (volume: number) => {
 						try {
 							api.metronomeVolume = volume;
@@ -1123,6 +1242,10 @@ export default function Preview({
 						} catch (err) {
 							console.error("Failed to set count-in:", err);
 						}
+					},
+					setScoreTracksMuted: (muted: boolean) => {
+						applyScoreTracksMuted(api, muted);
+						useAppStore.getState().setMetronomeOnlyMode(muted);
 					},
 					seekPlaybackPosition: (tick: number) => {
 						if (!Number.isFinite(tick)) return;
@@ -1319,6 +1442,7 @@ export default function Preview({
 						if (apiRef.current) {
 							applyAtDocWarmSettings(apiRef.current);
 							applyAtDocHotSettings(apiRef.current);
+							applyAtDocTrackMixSettings(apiRef.current);
 							applyAtDocColoring(
 								apiRef.current,
 								atDocConfigRef.current,
@@ -1327,6 +1451,9 @@ export default function Preview({
 						}
 						// 🆕 统一调用 applyTracksConfig，无论是首次还是重建
 						if (apiRef.current) applyTracksConfig(apiRef.current);
+						if (apiRef.current && metronomeOnlyModeRef.current) {
+							applyScoreTracksMuted(apiRef.current, true);
+						}
 						// 🆕 如果有挂起的小节号高亮请求，scoreLoaded 后执行
 						if (apiRef.current && pendingBarColorRef.current !== null) {
 							applyEditorBarNumberColor(
@@ -1412,6 +1539,7 @@ export default function Preview({
 					// 初始应用全局状态的播放速度与节拍器音量
 					try {
 						apiRef.current.playbackSpeed = playbackSpeedRef.current;
+						apiRef.current.masterVolume = masterVolumeRef.current;
 						apiRef.current.metronomeVolume = metronomeVolumeRef.current;
 						apiRef.current.countInVolume = countInEnabledRef.current ? 1 : 0;
 					} catch {
@@ -1483,6 +1611,7 @@ export default function Preview({
 									// 重新应用全局状态的播放速度与节拍器音量
 									try {
 										apiRef.current.playbackSpeed = playbackSpeedRef.current;
+										apiRef.current.masterVolume = masterVolumeRef.current;
 										apiRef.current.metronomeVolume = metronomeVolumeRef.current;
 										apiRef.current.countInVolume = countInEnabledRef.current
 											? 1
@@ -1597,6 +1726,7 @@ export default function Preview({
 		applyTracksConfig,
 		reinitTrigger,
 		applyZoom,
+		applyScoreTracksMuted,
 		applyEditorBarNumberColor,
 		bumpScoreVersion,
 		bumpApiInstanceId,
@@ -1609,6 +1739,7 @@ export default function Preview({
 		markLoadAsUserContent,
 		clearTexTimeout,
 		applyAtDocHotSettings,
+		applyAtDocTrackMixSettings,
 		applyAtDocWarmSettings,
 		syncStoreFromAtDoc,
 		onErrorRecovery,
@@ -1639,6 +1770,7 @@ export default function Preview({
 		const parsedAtDoc = parseAtDoc(contentToApplyRaw);
 		atDocConfigRef.current = parsedAtDoc.config;
 		syncStoreFromAtDoc(parsedAtDoc.config);
+		applyAtDocTrackMixSettings(api);
 		for (const warning of parsedAtDoc.warnings) {
 			console.warn(`[ATDOC:${warning.line}] ${warning.message}`);
 		}
@@ -1685,6 +1817,7 @@ export default function Preview({
 		markLoadAsUserContent,
 		clearTexTimeout,
 		syncStoreFromAtDoc,
+		applyAtDocTrackMixSettings,
 		setParseError,
 	]);
 

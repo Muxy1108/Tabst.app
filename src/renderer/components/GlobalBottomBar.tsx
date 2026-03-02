@@ -12,6 +12,8 @@ import {
 	RotateCw,
 	Settings,
 	Square,
+	Volume2,
+	VolumeX,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -168,6 +170,10 @@ function EditorBottomBar({
 	playerControls,
 	playbackSpeed,
 	setPlaybackSpeed,
+	masterVolume,
+	setMasterVolume,
+	metronomeOnlyMode,
+	setMetronomeOnlyMode,
 	playbackBpmMode,
 	metronomeVolume,
 	setMetronomeVolume,
@@ -200,6 +206,10 @@ function EditorBottomBar({
 	playerControls: ReturnType<typeof useAppStore.getState>["playerControls"];
 	playbackSpeed: number;
 	setPlaybackSpeed: (s: number) => void;
+	masterVolume: number;
+	setMasterVolume: (v: number) => void;
+	metronomeOnlyMode: boolean;
+	setMetronomeOnlyMode: (v: boolean) => void;
 	playbackBpmMode: boolean;
 	metronomeVolume: number;
 	setMetronomeVolume: (v: number) => void;
@@ -221,7 +231,7 @@ function EditorBottomBar({
 	workspaceMode: "editor" | "enjoy" | "tutorial" | "settings" | "git";
 	activeSettingsPageId: string | null;
 	transportOnly?: boolean;
-	t: (key: string) => string;
+	t: (key: string, opts?: Record<string, string | number>) => string;
 }) {
 	// 获取自定义播放器配置
 	const customPlayerConfig = useAppStore((s) => s.customPlayerConfig);
@@ -314,6 +324,32 @@ function EditorBottomBar({
 		</div>
 	);
 
+	const masterVolumePercent = Math.round(masterVolume * 100);
+	const masterVolumeControls = (
+		<div className="flex items-center gap-1.5 rounded-md bg-muted/40 px-2 py-1">
+			<Volume2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+			<input
+				type="range"
+				min={0}
+				max={100}
+				step={1}
+				value={masterVolumePercent}
+				onChange={(event) => {
+					const nextPercent = Number.parseInt(event.currentTarget.value, 10);
+					if (Number.isNaN(nextPercent)) return;
+					const nextVolume = Math.max(0, Math.min(100, nextPercent)) / 100;
+					setMasterVolume(nextVolume);
+					playerControls?.setMasterVolume?.(nextVolume);
+				}}
+				aria-label={t("toolbar:masterVolume.label")}
+				className="h-1.5 w-20 cursor-pointer accent-primary"
+			/>
+			<span className="w-8 text-right text-[11px] tabular-nums text-muted-foreground">
+				{t("toolbar:masterVolume.value", { value: masterVolumePercent })}
+			</span>
+		</div>
+	);
+
 	const metronomeControls = (
 		<div className="flex items-center">
 			<Tooltip>
@@ -335,6 +371,33 @@ function EditorBottomBar({
 						{metronomeVolume > 0
 							? t("toolbar:metronome.disable")
 							: t("toolbar:metronome.enable")}
+					</p>
+				</TooltipContent>
+			</Tooltip>
+		</div>
+	);
+
+	const metronomeOnlyControls = (
+		<div className="flex items-center">
+			<Tooltip>
+				<TooltipTrigger asChild>
+					<IconButton
+						active={metronomeOnlyMode}
+						onClick={() => {
+							const nextMuted = !metronomeOnlyMode;
+							setMetronomeOnlyMode(nextMuted);
+							playerControls?.setScoreTracksMuted?.(nextMuted);
+						}}
+						aria-label={t("toolbar:metronomeOnly.label")}
+					>
+						<VolumeX className="h-4 w-4" />
+					</IconButton>
+				</TooltipTrigger>
+				<TooltipContent side="top">
+					<p>
+						{metronomeOnlyMode
+							? t("toolbar:metronomeOnly.disable")
+							: t("toolbar:metronomeOnly.enable")}
 					</p>
 				</TooltipContent>
 			</Tooltip>
@@ -371,8 +434,10 @@ function EditorBottomBar({
 	const playbackSpeedControls = (
 		<div className="flex items-center gap-1 text-xs">
 			{playbackSpeedControl}
+			{masterVolumeControls}
 			{metronomeControls}
 			{countInControls}
+			{metronomeOnlyControls}
 		</div>
 	);
 
@@ -610,6 +675,10 @@ export default function GlobalBottomBar() {
 	const setZoomPercent = useAppStore((s) => s.setZoomPercent);
 	const playbackSpeed = useAppStore((s) => s.playbackSpeed);
 	const setPlaybackSpeed = useAppStore((s) => s.setPlaybackSpeed);
+	const masterVolume = useAppStore((s) => s.masterVolume);
+	const setMasterVolume = useAppStore((s) => s.setMasterVolume);
+	const metronomeOnlyMode = useAppStore((s) => s.metronomeOnlyMode);
+	const setMetronomeOnlyMode = useAppStore((s) => s.setMetronomeOnlyMode);
 	const playbackBpmMode = useAppStore((s) => s.playbackBpmMode);
 	const metronomeVolume = useAppStore((s) => s.metronomeVolume);
 	const setMetronomeVolume = useAppStore((s) => s.setMetronomeVolume);
@@ -694,6 +763,10 @@ export default function GlobalBottomBar() {
 				playerControls={playerControls}
 				playbackSpeed={playbackSpeed}
 				setPlaybackSpeed={setPlaybackSpeed}
+				masterVolume={masterVolume}
+				setMasterVolume={setMasterVolume}
+				metronomeOnlyMode={metronomeOnlyMode}
+				setMetronomeOnlyMode={setMetronomeOnlyMode}
 				playbackBpmMode={playbackBpmMode}
 				metronomeVolume={metronomeVolume}
 				setMetronomeVolume={setMetronomeVolume}
@@ -726,6 +799,10 @@ export default function GlobalBottomBar() {
 				playerControls={playerControls}
 				playbackSpeed={playbackSpeed}
 				setPlaybackSpeed={setPlaybackSpeed}
+				masterVolume={masterVolume}
+				setMasterVolume={setMasterVolume}
+				metronomeOnlyMode={metronomeOnlyMode}
+				setMetronomeOnlyMode={setMetronomeOnlyMode}
 				playbackBpmMode={playbackBpmMode}
 				metronomeVolume={metronomeVolume}
 				setMetronomeVolume={setMetronomeVolume}

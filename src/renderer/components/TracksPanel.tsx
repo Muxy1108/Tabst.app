@@ -6,7 +6,17 @@
  */
 
 import type * as AlphaTab from "@coderline/alphatab";
-import { Check, Eye, EyeOff, Layers, Music, Volume2, X } from "lucide-react";
+import {
+	Check,
+	Eye,
+	EyeOff,
+	Headphones,
+	Layers,
+	Music,
+	Volume2,
+	VolumeX,
+	X,
+} from "lucide-react";
 import {
 	type ReactNode,
 	useCallback,
@@ -15,6 +25,10 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import {
+	applyPlaybackFlagsToTrackConfigs,
+	captureTrackPlaybackFlags,
+} from "../lib/player-audio";
 import { useAppStore } from "../store/appStore";
 import { Button } from "./ui/button";
 import {
@@ -44,6 +58,8 @@ interface TrackConfig {
 	index: number;
 	name: string;
 	isSelected: boolean;
+	isMuted: boolean;
+	isSolo: boolean;
 	volumePercent: number;
 	staves: StaffConfig[];
 }
@@ -112,6 +128,8 @@ export function TracksPanel({
 			index: track.index,
 			name: track.name || `Track ${track.index + 1}`,
 			isSelected: selectedIndices.has(track.index),
+			isMuted: track.playbackInfo?.isMute === true,
+			isSolo: track.playbackInfo?.isSolo === true,
 			volumePercent: 100,
 			staves: track.staves.map((staff, staffIdx) => ({
 				staffIndex:
@@ -128,6 +146,13 @@ export function TracksPanel({
 		setTrackConfigs(configs);
 		applyAllTrackVolumes(configs, api.score);
 	}, [api, api?.score, applyAllTrackVolumes]);
+
+	const syncTrackPlaybackFlags = useCallback((score: AlphaTab.model.Score) => {
+		const playbackFlags = captureTrackPlaybackFlags(score.tracks);
+		setTrackConfigs((prev) =>
+			applyPlaybackFlagsToTrackConfigs(prev, playbackFlags),
+		);
+	}, []);
 
 	// 监听 store 的 firstStaffOptions 变化，同步到本地状态（来自底栏 StaffControls 的更改）
 	useEffect(() => {
@@ -330,6 +355,36 @@ export function TracksPanel({
 		[api, applyTrackVolume],
 	);
 
+	const toggleTrackMute = useCallback(
+		(trackIndex: number) => {
+			const score = api?.score;
+			if (!score) return;
+
+			const track = score.tracks.find((t) => t.index === trackIndex);
+			if (!track) return;
+
+			const nextMute = !(track.playbackInfo?.isMute === true);
+			api.changeTrackMute([track], nextMute);
+			syncTrackPlaybackFlags(score);
+		},
+		[api, syncTrackPlaybackFlags],
+	);
+
+	const toggleTrackSolo = useCallback(
+		(trackIndex: number) => {
+			const score = api?.score;
+			if (!score) return;
+
+			const track = score.tracks.find((t) => t.index === trackIndex);
+			if (!track) return;
+
+			const nextSolo = !(track.playbackInfo?.isSolo === true);
+			api.changeTrackSolo([track], nextSolo);
+			syncTrackPlaybackFlags(score);
+		},
+		[api, syncTrackPlaybackFlags],
+	);
+
 	// 同步第一个音轨的第一个谱表配置到 store
 	const syncFirstStaffToStore = useCallback(
 		(staffConfig: StaffConfig) => {
@@ -501,6 +556,8 @@ export function TracksPanel({
 									config={config}
 									onToggleSelection={toggleTrackSelection}
 									onSetTrackVolume={setTrackVolume}
+									onToggleTrackMute={toggleTrackMute}
+									onToggleTrackSolo={toggleTrackSolo}
 									onToggleStaffOption={toggleStaffOption}
 								/>
 							))}
@@ -534,6 +591,8 @@ interface TrackItemProps {
 	config: TrackConfig;
 	onToggleSelection: (trackIndex: number) => void;
 	onSetTrackVolume: (trackIndex: number, volumePercent: number) => void;
+	onToggleTrackMute: (trackIndex: number) => void;
+	onToggleTrackSolo: (trackIndex: number) => void;
 	onToggleStaffOption: (
 		trackIndex: number,
 		staffIndex: number,
@@ -610,10 +669,13 @@ function TrackItem({
 	config,
 	onToggleSelection,
 	onSetTrackVolume,
+	onToggleTrackMute,
+	onToggleTrackSolo,
 	onToggleStaffOption,
 }: TrackItemProps) {
 	const { t } = useTranslation("print");
-	const { index, name, isSelected, staves, volumePercent } = config;
+	const { index, name, isSelected, isMuted, isSolo, staves, volumePercent } =
+		config;
 
 	return (
 		<div
@@ -624,11 +686,17 @@ function TrackItem({
 			}`}
 		>
 			{/* 音轨标题行 */}
-			<button
-				type="button"
+			<div
+				role="button"
+				tabIndex={0}
 				aria-pressed={isSelected}
 				className="w-full text-left flex items-center gap-2 p-2 hover:bg-muted/50 rounded-md"
 				onClick={() => onToggleSelection(index)}
+				onKeyDown={(event) => {
+					if (event.key !== "Enter" && event.key !== " ") return;
+					event.preventDefault();
+					onToggleSelection(index);
+				}}
 			>
 				{/* 选择指示器 */}
 				<div
@@ -657,7 +725,69 @@ function TrackItem({
 				>
 					{name}
 				</span>
-			</button>
+				<div className="flex items-center gap-1">
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<button
+								type="button"
+								aria-label={
+									isMuted
+										? t("trackUnmute", { track: name })
+										: t("trackMute", { track: name })
+								}
+								className={`h-6 w-6 rounded inline-flex items-center justify-center transition-colors ${
+									isMuted
+										? "bg-primary text-primary-foreground"
+										: "text-muted-foreground hover:bg-muted"
+								}`}
+								onClick={(event) => {
+									event.stopPropagation();
+									onToggleTrackMute(index);
+								}}
+							>
+								<VolumeX className="h-3.5 w-3.5" />
+							</button>
+						</TooltipTrigger>
+						<TooltipContent side="top">
+							<p>
+								{isMuted
+									? t("trackUnmute", { track: name })
+									: t("trackMute", { track: name })}
+							</p>
+						</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<button
+								type="button"
+								aria-label={
+									isSolo
+										? t("trackUnsolo", { track: name })
+										: t("trackSolo", { track: name })
+								}
+								className={`h-6 w-6 rounded inline-flex items-center justify-center transition-colors ${
+									isSolo
+										? "bg-primary text-primary-foreground"
+										: "text-muted-foreground hover:bg-muted"
+								}`}
+								onClick={(event) => {
+									event.stopPropagation();
+									onToggleTrackSolo(index);
+								}}
+							>
+								<Headphones className="h-3.5 w-3.5" />
+							</button>
+						</TooltipTrigger>
+						<TooltipContent side="top">
+							<p>
+								{isSolo
+									? t("trackUnsolo", { track: name })
+									: t("trackSolo", { track: name })}
+							</p>
+						</TooltipContent>
+					</Tooltip>
+				</div>
+			</div>
 			<div className="px-2 pb-1">
 				<div className="flex items-center gap-2 rounded-md bg-muted/40 px-2 py-1.5">
 					<Volume2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />

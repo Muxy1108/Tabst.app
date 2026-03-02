@@ -26,6 +26,10 @@
 	"selectedCount": "已选择 {{n}} / {{total}} 音轨",
 	"trackVolume": "音轨音量：{{track}}",
 	"trackVolumeValue": "{{value}}%",
+	"trackMute": "静音音轨：{{track}}",
+	"trackUnmute": "取消静音音轨：{{track}}",
+	"trackSolo": "独奏音轨：{{track}}",
+	"trackUnsolo": "取消独奏音轨：{{track}}",
 	"done": "完成",
 	"staffLabel": "谱表 {{n}}",
 	"staff": {

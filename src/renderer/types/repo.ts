@@ -22,6 +22,7 @@ export interface RepoPreferences {
 	staffOptions?: StaffDisplayOptions;
 	zoomPercent?: number;
 	playbackSpeed?: number;
+	masterVolume?: number;
 	playbackBpmMode?: boolean;
 	metronomeVolume?: number;
 	countInEnabled?: boolean;

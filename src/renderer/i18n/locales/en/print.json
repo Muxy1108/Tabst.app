@@ -26,6 +26,10 @@
 	"selectedCount": "{{n}} / {{total}} selected",
 	"trackVolume": "Track volume: {{track}}",
 	"trackVolumeValue": "{{value}}%",
+	"trackMute": "Mute track: {{track}}",
+	"trackUnmute": "Unmute track: {{track}}",
+	"trackSolo": "Solo track: {{track}}",
+	"trackUnsolo": "Disable solo for track: {{track}}",
 	"done": "Done",
 	"staffLabel": "Staff {{n}}",
 	"staff": {

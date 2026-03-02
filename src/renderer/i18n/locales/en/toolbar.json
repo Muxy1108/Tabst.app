@@ -9,10 +9,19 @@
 	"playbackSpeed": "Playback speed",
 	"playbackProgress": "Playback progress",
 	"playbackSeekDisabled": "Drag seek is disabled in settings",
+	"masterVolume": {
+		"label": "Master volume",
+		"value": "{{value}}%"
+	},
 	"metronome": {
 		"label": "Metronome",
 		"enable": "Enable metronome",
 		"disable": "Disable metronome"
+	},
+	"metronomeOnly": {
+		"label": "Metronome-only mode",
+		"enable": "Mute score, keep metronome only",
+		"disable": "Restore score audio"
 	},
 	"countIn": {
 		"label": "Count-in",

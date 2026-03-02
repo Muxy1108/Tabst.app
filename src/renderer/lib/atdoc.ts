@@ -42,6 +42,9 @@ export interface AtDocConfig {
 		scrollMode?: alphaTab.ScrollMode;
 		scrollSpeed?: number;
 		playbackSpeed?: number;
+		volume?: number;
+		muteTracks?: number[];
+		soloTracks?: number[];
 		metronomeVolume?: number;
 		countInEnabled?: boolean;
 		enableCursor?: boolean;
@@ -142,6 +145,28 @@ function parseStringList(value: string): string[] {
 		.split(",")
 		.map((item) => unquote(item).trim())
 		.filter((item) => item.length > 0);
+}
+
+function parseNonNegativeIntegerList(value: string): number[] | null {
+	const tokens = value
+		.split(",")
+		.map((item) => item.trim())
+		.filter((item) => item.length > 0);
+	if (tokens.length === 0) return null;
+
+	const out: number[] = [];
+	const seen = new Set<number>();
+	for (const token of tokens) {
+		const n = Number(token);
+		if (!Number.isInteger(n) || n < 0) {
+			return null;
+		}
+		if (!seen.has(n)) {
+			seen.add(n);
+			out.push(n);
+		}
+	}
+	return out;
 }
 
 function mergeUnique(base: string[] | undefined, incoming: string[]): string[] {
@@ -359,6 +384,34 @@ function applyDirective(
 				return;
 			}
 			config.player = { ...(config.player ?? {}), playbackSpeed: n };
+			return;
+		}
+		case "at.player.volume": {
+			const n = toNumber(value);
+			if (n === null || n < 0 || n > 1) {
+				warnings.push({
+					line,
+					message: "at.player.volume must be a number in [0, 1]",
+				});
+				return;
+			}
+			config.player = { ...(config.player ?? {}), volume: n };
+			return;
+		}
+		case "at.player.muteTracks":
+		case "at.player.soloTracks": {
+			const indexes = parseNonNegativeIntegerList(value);
+			if (!indexes) {
+				warnings.push({
+					line,
+					message: `${key} must be a comma-separated list of non-negative integers`,
+				});
+				return;
+			}
+			const player = { ...(config.player ?? {}) };
+			if (key === "at.player.muteTracks") player.muteTracks = indexes;
+			if (key === "at.player.soloTracks") player.soloTracks = indexes;
+			config.player = player;
 			return;
 		}
 		case "at.player.metronomeVolume": {

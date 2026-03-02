@@ -136,6 +136,24 @@ const DEFAULT_ATDOC_KEY_DEFINITIONS: AtDocKeyDefinition[] = [
 		example: "at.player.playbackSpeed=0.9",
 	},
 	{
+		key: "at.player.volume",
+		valueType: "number",
+		description: "Overall player volume in [0,1]",
+		example: "at.player.volume=0.8",
+	},
+	{
+		key: "at.player.muteTracks",
+		valueType: "string",
+		description: "Mute track indexes (comma-separated, zero-based)",
+		example: "at.player.muteTracks=1,3",
+	},
+	{
+		key: "at.player.soloTracks",
+		valueType: "string",
+		description: "Solo track indexes (comma-separated, zero-based)",
+		example: "at.player.soloTracks=0",
+	},
+	{
 		key: "at.player.metronomeVolume",
 		valueType: "number",
 		description: "Metronome volume in [0,1]",

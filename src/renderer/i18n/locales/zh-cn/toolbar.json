@@ -9,10 +9,19 @@
 	"playbackSpeed": "播放速度",
 	"playbackProgress": "播放进度",
 	"playbackSeekDisabled": "拖动定位已在设置中关闭",
+	"masterVolume": {
+		"label": "总体音量",
+		"value": "{{value}}%"
+	},
 	"metronome": {
 		"label": "节拍器",
 		"enable": "开启节拍器",
 		"disable": "关闭节拍器"
+	},
+	"metronomeOnly": {
+		"label": "仅节拍器模式",
+		"enable": "静音曲谱，仅保留节拍器",
+		"disable": "恢复曲谱声音"
 	},
 	"countIn": {
 		"label": "预备拍",
