@@ -73,6 +73,7 @@ export interface PreviewProps {
 	onApiChange?: (api: alphaTab.AlphaTabApi | null) => void;
 	onEnjoyToggle?: () => void;
 	isEnjoyMode?: boolean;
+	mobileScoreFit?: boolean;
 }
 
 const PrintPreview = lazy(() => import("./PrintPreview"));
@@ -84,6 +85,7 @@ export default function Preview({
 	onApiChange,
 	onEnjoyToggle,
 	isEnjoyMode = false,
+	mobileScoreFit = false,
 }: PreviewProps) {
 	const { t } = useTranslation(["common", "errors", "print", "toolbar"]);
 	const containerRef = useRef<HTMLDivElement | null>(null);
@@ -1729,7 +1731,9 @@ export default function Preview({
 								ref={scrollHostRef}
 								className="absolute inset-0 overflow-auto"
 							>
-								<div className="w-full min-h-full pb-[var(--scroll-buffer)] overflow-x-hidden">
+								<div
+									className={`w-full min-h-full pb-[var(--scroll-buffer)] ${mobileScoreFit ? "preview-mobile-fit overflow-x-auto" : "overflow-x-hidden"}`}
+								>
 									<div ref={containerRef} className="w-full h-full" />
 								</div>
 								{/* 暂时关闭自定义播放器光标功能

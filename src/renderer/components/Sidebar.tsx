@@ -917,7 +917,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
 
 	return (
 		<TooltipProvider delayDuration={200}>
-			<div className="w-60 max-w-[15rem] h-full border-r border-border flex flex-col bg-card box-border overflow-x-hidden shrink-0">
+			<div className="relative z-20 w-60 max-w-[15rem] h-full border-r border-border flex flex-col bg-card box-border overflow-x-hidden shrink-0">
 				<SidebarCommands
 					onCollapse={onCollapse}
 					onOpenFile={() => {

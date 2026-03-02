@@ -296,6 +296,25 @@
 	}
 }
 
+/*
+ Mobile preview fit for alphaTab:
+ - keep rendered score inside viewport width
+ - avoid right-edge clipping on narrow screens
+*/
+.preview-mobile-fit .at-surface,
+.preview-mobile-fit .at-surface > div {
+	width: 100% !important;
+	max-width: 100% !important;
+}
+
+.preview-mobile-fit .at-surface svg,
+.preview-mobile-fit .at-surface-svg {
+	display: block;
+	width: 100% !important;
+	max-width: 100% !important;
+	height: auto !important;
+}
+
 /* AlphaTab 光标和选择样式 */
 .alpha-cursor,
 .at-cursor-bar {

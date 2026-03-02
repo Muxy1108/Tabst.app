@@ -13,6 +13,7 @@ import {
 	Settings,
 	Square,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TutorialMetadata } from "../data/tutorials";
 import {
@@ -20,6 +21,7 @@ import {
 	getPrevTutorial,
 	getTutorialDisplayTitle,
 } from "../lib/tutorial-loader";
+import { shouldUseWebsiteMobileTransportOnly } from "../lib/website-layout";
 import { useAppStore } from "../store/appStore";
 import BpmStepper from "./BpmStepper";
 import StaffControls from "./StaffControls";
@@ -184,6 +186,7 @@ function EditorBottomBar({
 	setActiveSettingsPageId,
 	workspaceMode,
 	activeSettingsPageId,
+	transportOnly = false,
 	t,
 }: {
 	firstStaffOptions: ReturnType<
@@ -217,6 +220,7 @@ function EditorBottomBar({
 	setActiveSettingsPageId: (id: string | null) => void;
 	workspaceMode: "editor" | "enjoy" | "tutorial" | "settings" | "git";
 	activeSettingsPageId: string | null;
+	transportOnly?: boolean;
 	t: (key: string) => string;
 }) {
 	// 获取自定义播放器配置
@@ -554,6 +558,12 @@ function EditorBottomBar({
 	};
 
 	// 根据配置渲染组件
+	if (transportOnly) {
+		return (
+			<div className="flex items-center gap-2 min-w-0">{transportControls}</div>
+		);
+	}
+
 	const renderedComponents = customPlayerConfig.components
 		.filter((component) => component.enabled)
 		.map((component, _index) => {
@@ -587,6 +597,8 @@ function EditorBottomBar({
 
 export default function GlobalBottomBar() {
 	const { t } = useTranslation(["toolbar", "settings", "common"]);
+	const [isWebRuntime, setIsWebRuntime] = useState(false);
+	const [viewportWidth, setViewportWidth] = useState<number>(window.innerWidth);
 	const activeFile = useAppStore((state) => state.getActiveFile());
 	const firstStaffOptions = useAppStore((state) => state.firstStaffOptions);
 	const requestStaffToggle = useAppStore((state) => state.requestStaffToggle);
@@ -633,6 +645,34 @@ export default function GlobalBottomBar() {
 	const nextTutorial = activeTutorialId
 		? getNextTutorial(activeTutorialId, tutorialAudience)
 		: null;
+	const transportOnly = shouldUseWebsiteMobileTransportOnly({
+		isWebRuntime,
+		viewportWidth,
+		workspaceMode,
+		activeSettingsPageId,
+		isAtexFile,
+	});
+
+	useEffect(() => {
+		let mounted = true;
+		void window.electronAPI
+			.getAppVersion()
+			.then((version) => {
+				if (!mounted) return;
+				setIsWebRuntime(version === "web");
+			})
+			.catch(() => {
+				if (!mounted) return;
+				setIsWebRuntime(false);
+			});
+
+		const handleResize = () => setViewportWidth(window.innerWidth);
+		window.addEventListener("resize", handleResize);
+		return () => {
+			mounted = false;
+			window.removeEventListener("resize", handleResize);
+		};
+	}, []);
 
 	const bottomBarContent =
 		workspaceMode === "git" ? (
@@ -672,6 +712,7 @@ export default function GlobalBottomBar() {
 				setActiveSettingsPageId={setActiveSettingsPageId}
 				workspaceMode={workspaceMode}
 				activeSettingsPageId={activeSettingsPageId}
+				transportOnly={transportOnly}
 				t={t}
 			/>
 		) : isSettingsMode ? (
@@ -703,17 +744,24 @@ export default function GlobalBottomBar() {
 				setActiveSettingsPageId={setActiveSettingsPageId}
 				workspaceMode={workspaceMode}
 				activeSettingsPageId={activeSettingsPageId}
+				transportOnly={transportOnly}
 				t={t}
 			/>
 		) : null;
 
 	return (
 		<TooltipProvider delayDuration={200}>
-			<footer className="h-9 border-t border-border bg-card flex items-center justify-between px-4 text-xs text-muted-foreground flex-shrink-0 w-full">
-				<div className="flex items-center gap-3">
+			<footer
+				className={`h-9 border-t border-border bg-card flex items-center justify-between text-xs text-muted-foreground flex-shrink-0 w-full ${transportOnly ? "px-2" : "px-4"}`}
+			>
+				<div
+					className={`flex items-center gap-3 ${transportOnly ? "hidden" : ""}`}
+				>
 					<span className="font-medium">Tabst@JayBridge</span>
 				</div>
-				<div className="flex items-center gap-2 min-w-0 flex-1 justify-end">
+				<div
+					className={`flex items-center gap-2 min-w-0 flex-1 ${transportOnly ? "justify-center" : "justify-end"}`}
+				>
 					{bottomBarContent}
 				</div>
 			</footer>

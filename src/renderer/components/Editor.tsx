@@ -28,7 +28,10 @@ import {
 	type InlineCommandId,
 } from "../lib/command-registry";
 import { runUiCommand } from "../lib/ui-command-registry";
-import { isWebsiteMobilePreviewStack } from "../lib/website-layout";
+import {
+	isWebsiteMobileLayout,
+	isWebsiteMobilePreviewStack,
+} from "../lib/website-layout";
 import { whitespaceDecoration } from "../lib/whitespace-decoration";
 import { type FileItem, useAppStore } from "../store/appStore";
 import InlineEditorCommandBar from "./InlineEditorCommandBar";
@@ -118,6 +121,11 @@ export function Editor({
 			window.removeEventListener("resize", handleResize);
 		};
 	}, []);
+
+	const websiteMobileLayout = isWebsiteMobileLayout({
+		isWebRuntime,
+		viewportWidth,
+	});
 
 	const shouldStackWebsitePreview = isWebsiteMobilePreviewStack({
 		isWebRuntime,
@@ -780,6 +788,7 @@ export function Editor({
 								setWorkspaceMode(workspaceMode === "enjoy" ? "editor" : "enjoy")
 							}
 							isEnjoyMode={enjoyMode}
+							mobileScoreFit={websiteMobileLayout}
 						/>
 						{enjoyMode && (
 							<TracksPanel
