@@ -112,8 +112,11 @@ export function TracksPanel({
 	// 订阅 store 的 firstStaffOptions 以保持同步
 	const firstStaffOptions = useAppStore((s) => s.firstStaffOptions);
 	const setFirstStaffOptions = useAppStore((s) => s.setFirstStaffOptions);
+	const metronomeOnlyMode = useAppStore((s) => s.metronomeOnlyMode);
+	const setMetronomeOnlyMode = useAppStore((s) => s.setMetronomeOnlyMode);
 	// 防止循环更新的标志
 	const isUpdatingFromStoreRef = useRef(false);
+	const lastSyncedMetronomeOnlyModeRef = useRef<boolean | null>(null);
 
 	// 初始化：从 API 读取初始状态
 	useEffect(() => {
@@ -153,6 +156,23 @@ export function TracksPanel({
 			applyPlaybackFlagsToTrackConfigs(prev, playbackFlags),
 		);
 	}, []);
+
+	useEffect(() => {
+		if (!api?.score || trackConfigs.length === 0) return;
+		if (lastSyncedMetronomeOnlyModeRef.current === metronomeOnlyMode) {
+			return;
+		}
+		lastSyncedMetronomeOnlyModeRef.current = metronomeOnlyMode;
+
+		const score = api.score;
+		const timer = window.setTimeout(() => {
+			syncTrackPlaybackFlags(score);
+		}, 20);
+
+		return () => {
+			window.clearTimeout(timer);
+		};
+	}, [api, metronomeOnlyMode, syncTrackPlaybackFlags, trackConfigs.length]);
 
 	// 监听 store 的 firstStaffOptions 变化，同步到本地状态（来自底栏 StaffControls 的更改）
 	useEffect(() => {
@@ -363,11 +383,39 @@ export function TracksPanel({
 			const track = score.tracks.find((t) => t.index === trackIndex);
 			if (!track) return;
 
-			const nextMute = !(track.playbackInfo?.isMute === true);
+			const currentConfig = trackConfigs.find(
+				(cfg) => cfg.index === trackIndex,
+			);
+			const isMuted =
+				currentConfig?.isMuted ?? track.playbackInfo?.isMute === true;
+			const isSolo =
+				currentConfig?.isSolo ?? track.playbackInfo?.isSolo === true;
+			const nextMute = !isMuted;
+
+			if (nextMute && isSolo) {
+				api.changeTrackSolo([track], false);
+			}
+
 			api.changeTrackMute([track], nextMute);
-			syncTrackPlaybackFlags(score);
+			const nextTrackConfigs = trackConfigs.map((cfg) => {
+				if (cfg.index !== trackIndex) return cfg;
+				return {
+					...cfg,
+					isMuted: nextMute,
+					isSolo: nextMute ? false : cfg.isSolo,
+				};
+			});
+
+			setTrackConfigs(nextTrackConfigs);
+
+			const allTracksMuted =
+				nextTrackConfigs.length > 0 &&
+				nextTrackConfigs.every((cfg) => cfg.isMuted);
+			if (allTracksMuted !== useAppStore.getState().metronomeOnlyMode) {
+				setMetronomeOnlyMode(allTracksMuted);
+			}
 		},
-		[api, syncTrackPlaybackFlags],
+		[api, trackConfigs, setMetronomeOnlyMode],
 	);
 
 	const toggleTrackSolo = useCallback(
@@ -378,11 +426,39 @@ export function TracksPanel({
 			const track = score.tracks.find((t) => t.index === trackIndex);
 			if (!track) return;
 
-			const nextSolo = !(track.playbackInfo?.isSolo === true);
+			const currentConfig = trackConfigs.find(
+				(cfg) => cfg.index === trackIndex,
+			);
+			const isMuted =
+				currentConfig?.isMuted ?? track.playbackInfo?.isMute === true;
+			const isSolo =
+				currentConfig?.isSolo ?? track.playbackInfo?.isSolo === true;
+			const nextSolo = !isSolo;
+
+			if (nextSolo && isMuted) {
+				api.changeTrackMute([track], false);
+			}
+
 			api.changeTrackSolo([track], nextSolo);
-			syncTrackPlaybackFlags(score);
+			const nextTrackConfigs = trackConfigs.map((cfg) => {
+				if (cfg.index !== trackIndex) return cfg;
+				return {
+					...cfg,
+					isSolo: nextSolo,
+					isMuted: nextSolo ? false : cfg.isMuted,
+				};
+			});
+
+			setTrackConfigs(nextTrackConfigs);
+
+			const allTracksMuted =
+				nextTrackConfigs.length > 0 &&
+				nextTrackConfigs.every((cfg) => cfg.isMuted);
+			if (allTracksMuted !== useAppStore.getState().metronomeOnlyMode) {
+				setMetronomeOnlyMode(allTracksMuted);
+			}
 		},
-		[api, syncTrackPlaybackFlags],
+		[api, trackConfigs, setMetronomeOnlyMode],
 	);
 
 	// 同步第一个音轨的第一个谱表配置到 store
@@ -409,62 +485,62 @@ export function TracksPanel({
 			const score = api?.score;
 			if (!score) return;
 
-			setTrackConfigs((prev) => {
-				const newConfigs = prev.map((cfg) => {
-					if (cfg.index !== trackIndex) return cfg;
+			let nextFirstStaffConfig: StaffConfig | null = null;
+			let hasUpdated = false;
 
-					const currentStaff = cfg.staves.find(
-						(s) => s.staffIndex === staffIndex,
-					);
-					if (!currentStaff) return cfg;
+			const newConfigs = trackConfigs.map((cfg) => {
+				if (cfg.index !== trackIndex) return cfg;
 
-					// 计算新值
-					const newValue = !currentStaff[option];
+				const currentStaff = cfg.staves.find(
+					(s) => s.staffIndex === staffIndex,
+				);
+				if (!currentStaff) return cfg;
 
-					// 确保至少有一个显示选项被选中
-					const testStaff = { ...currentStaff, [option]: newValue };
-					const hasAnyOption =
-						testStaff.showStandardNotation ||
-						testStaff.showTablature ||
-						testStaff.showSlash ||
-						testStaff.showNumbered;
+				const newValue = !currentStaff[option];
+				const testStaff = { ...currentStaff, [option]: newValue };
+				const hasAnyOption =
+					testStaff.showStandardNotation ||
+					testStaff.showTablature ||
+					testStaff.showSlash ||
+					testStaff.showNumbered;
 
-					if (!hasAnyOption) return cfg;
+				if (!hasAnyOption) return cfg;
 
-					// 更新配置
-					const newStaves = cfg.staves.map((s) =>
-						s.staffIndex === staffIndex ? { ...s, [option]: newValue } : s,
-					);
+				hasUpdated = true;
 
-					// 立即应用到 AlphaTab 对象
-					const track = score.tracks.find((t) => t.index === trackIndex);
-					if (track) {
-						const staff =
-							track.staves.find(
-								(s) => (s as AlphaTab.model.Staff).index === staffIndex,
-							) || track.staves[0];
-						if (staff) {
-							(staff as AlphaTab.model.Staff)[option] = newValue;
-						}
+				const newStaves = cfg.staves.map((s) =>
+					s.staffIndex === staffIndex ? { ...s, [option]: newValue } : s,
+				);
+
+				const track = score.tracks.find((t) => t.index === trackIndex);
+				if (track) {
+					const staff =
+						track.staves.find(
+							(s) => (s as AlphaTab.model.Staff).index === staffIndex,
+						) || track.staves[0];
+					if (staff) {
+						(staff as AlphaTab.model.Staff)[option] = newValue;
 					}
+				}
 
-					// 如果是第一个音轨的第一个谱表，同步到 store
-					if (trackIndex === 0 && staffIndex === 0) {
-						const updatedStaff = { ...currentStaff, [option]: newValue };
-						syncFirstStaffToStore(updatedStaff);
-					}
+				if (trackIndex === 0 && staffIndex === 0) {
+					nextFirstStaffConfig = { ...currentStaff, [option]: newValue };
+				}
 
-					return { ...cfg, staves: newStaves };
-				});
-
-				// 触发重新渲染
-				score && api.render();
-				applyAllTrackVolumes(newConfigs, score);
-
-				return newConfigs;
+				return { ...cfg, staves: newStaves };
 			});
+
+			if (!hasUpdated) return;
+
+			setTrackConfigs(newConfigs);
+			api.render();
+			applyAllTrackVolumes(newConfigs, score);
+
+			if (nextFirstStaffConfig) {
+				syncFirstStaffToStore(nextFirstStaffConfig);
+			}
 		},
-		[api, applyAllTrackVolumes, syncFirstStaffToStore],
+		[api, applyAllTrackVolumes, syncFirstStaffToStore, trackConfigs],
 	);
 
 	// 计算选中数量
@@ -726,19 +802,30 @@ function TrackItem({
 					{name}
 				</span>
 				<div className="flex items-center gap-1">
+					{isMuted && (
+						<span className="h-5 px-1.5 rounded border border-rose-500/40 bg-rose-500/15 text-rose-600 text-[10px] font-semibold leading-none inline-flex items-center">
+							M
+						</span>
+					)}
+					{isSolo && (
+						<span className="h-5 px-1.5 rounded border border-amber-500/40 bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-semibold leading-none inline-flex items-center">
+							S
+						</span>
+					)}
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<button
 								type="button"
+								aria-pressed={isMuted}
 								aria-label={
 									isMuted
 										? t("trackUnmute", { track: name })
 										: t("trackMute", { track: name })
 								}
-								className={`h-6 w-6 rounded inline-flex items-center justify-center transition-colors ${
+								className={`h-6 w-6 rounded border inline-flex items-center justify-center transition-colors ${
 									isMuted
-										? "bg-primary text-primary-foreground"
-										: "text-muted-foreground hover:bg-muted"
+										? "border-rose-500/50 bg-rose-500/15 text-rose-600 shadow-sm"
+										: "border-transparent bg-muted text-muted-foreground hover:bg-muted/80"
 								}`}
 								onClick={(event) => {
 									event.stopPropagation();
@@ -760,15 +847,16 @@ function TrackItem({
 						<TooltipTrigger asChild>
 							<button
 								type="button"
+								aria-pressed={isSolo}
 								aria-label={
 									isSolo
 										? t("trackUnsolo", { track: name })
 										: t("trackSolo", { track: name })
 								}
-								className={`h-6 w-6 rounded inline-flex items-center justify-center transition-colors ${
+								className={`h-6 w-6 rounded border inline-flex items-center justify-center transition-colors ${
 									isSolo
-										? "bg-primary text-primary-foreground"
-										: "text-muted-foreground hover:bg-muted"
+										? "border-amber-500/50 bg-amber-500/20 text-amber-700 dark:text-amber-300 shadow-sm"
+										: "border-transparent bg-muted text-muted-foreground hover:bg-muted/80"
 								}`}
 								onClick={(event) => {
 									event.stopPropagation();

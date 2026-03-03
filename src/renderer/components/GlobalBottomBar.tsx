@@ -383,6 +383,11 @@ function EditorBottomBar({
 				<TooltipTrigger asChild>
 					<IconButton
 						active={metronomeOnlyMode}
+						className={
+							metronomeOnlyMode
+								? "bg-rose-500/15 text-rose-600 hover:bg-rose-500/20"
+								: ""
+						}
 						onClick={() => {
 							const nextMuted = !metronomeOnlyMode;
 							setMetronomeOnlyMode(nextMuted);

@@ -42,10 +42,6 @@ import { loadBravuraFont, loadSoundFontFromUrl } from "../lib/assets";
 import { type AtDocConfig, parseAtDoc } from "../lib/atdoc";
 import { applyAtDocColoring } from "../lib/atdoc-coloring";
 import {
-	captureTrackMuteState,
-	splitTracksByMuteState,
-} from "../lib/player-audio";
-import {
 	PREVIEW_COMMAND_EVENT,
 	type PreviewCommandId,
 } from "../lib/preview-command-events";
@@ -183,7 +179,6 @@ export default function Preview({
 	const lastAppliedMasterVolumeRef = useRef<number | null>(null);
 	const lastAppliedMetronomeVolumeRef = useRef<number | null>(null);
 	const lastAppliedCountInRef = useRef<number | null>(null);
-	const trackMuteSnapshotRef = useRef<Map<number, boolean> | null>(null);
 	const lastAppliedTexContentRef = useRef<string | null>(null);
 	const lastPlaybackProgressRef = useRef<{
 		positionTick: number;
@@ -467,32 +462,25 @@ export default function Preview({
 	}, []);
 
 	const applyScoreTracksMuted = useCallback(
-		(api: alphaTab.AlphaTabApi, muted: boolean) => {
+		(api: alphaTab.AlphaTabApi, muted: boolean): boolean => {
 			const scoreTracks = api.score?.tracks ?? [];
-			if (scoreTracks.length === 0) return;
+			if (scoreTracks.length === 0) return false;
+
+			const currentAllMuted = scoreTracks.every(
+				(track) => track.playbackInfo?.isMute === true,
+			);
 
 			try {
-				if (muted) {
-					trackMuteSnapshotRef.current = captureTrackMuteState(scoreTracks);
-					api.changeTrackMute(scoreTracks, true);
-					return;
+				api.changeTrackMute(scoreTracks, muted);
+
+				if (!muted) {
+					api.changeTrackSolo(scoreTracks, false);
 				}
 
-				const snapshot = trackMuteSnapshotRef.current;
-				const { mutedTracks, unmutedTracks } = splitTracksByMuteState(
-					scoreTracks,
-					snapshot,
-				);
-
-				if (mutedTracks.length > 0) {
-					api.changeTrackMute(mutedTracks, true);
-				}
-				if (unmutedTracks.length > 0) {
-					api.changeTrackMute(unmutedTracks, false);
-				}
-				trackMuteSnapshotRef.current = null;
+				return muted;
 			} catch (err) {
 				console.error("[Preview] Failed to apply score track mute state:", err);
+				return currentAllMuted;
 			}
 		},
 		[],
@@ -500,10 +488,7 @@ export default function Preview({
 
 	useEffect(() => {
 		metronomeOnlyModeRef.current = metronomeOnlyMode;
-		const api = apiRef.current;
-		if (!api) return;
-		applyScoreTracksMuted(api, metronomeOnlyMode);
-	}, [metronomeOnlyMode, applyScoreTracksMuted]);
+	}, [metronomeOnlyMode]);
 
 	// Bar highlight: use lib and keep lastColoredBars in ref for callbacks
 	const sanitizeAllBarStyles = useCallback(
@@ -1244,8 +1229,8 @@ export default function Preview({
 						}
 					},
 					setScoreTracksMuted: (muted: boolean) => {
-						applyScoreTracksMuted(api, muted);
-						useAppStore.getState().setMetronomeOnlyMode(muted);
+						const effectiveMuted = applyScoreTracksMuted(api, muted);
+						useAppStore.getState().setMetronomeOnlyMode(effectiveMuted);
 					},
 					seekPlaybackPosition: (tick: number) => {
 						if (!Number.isFinite(tick)) return;
