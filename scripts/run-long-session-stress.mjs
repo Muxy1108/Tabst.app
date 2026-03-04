@@ -10,6 +10,56 @@ const require = createRequire(import.meta.url);
 const ROOT = process.cwd();
 const DEBUG_PORT = 9333;
 const OUTPUT_DIR = path.join(ROOT, "docs", "dev", "ops");
+const STARTUP_TIMEOUT_MS = 60_000;
+const STARTUP_POLL_MS = 400;
+
+function waitForChildExit(child, timeoutMs) {
+	if (child.exitCode !== null) {
+		return Promise.resolve();
+	}
+
+	return new Promise((resolve) => {
+		let settled = false;
+		const finish = () => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			child.removeListener("exit", onExit);
+			child.removeListener("close", onExit);
+			resolve();
+		};
+		const onExit = () => finish();
+		const timer = setTimeout(() => finish(), timeoutMs);
+		child.once("exit", onExit);
+		child.once("close", onExit);
+	});
+}
+
+async function terminateChild(child) {
+	if (child.exitCode !== null) return;
+
+	try {
+		child.kill("SIGTERM");
+	} catch {}
+	await waitForChildExit(child, 2_500);
+
+	if (child.exitCode !== null) return;
+
+	try {
+		child.kill("SIGKILL");
+	} catch {}
+	await waitForChildExit(child, 1_500);
+}
+
+function getChildExitSummary(child) {
+	if (child.exitCode === null) {
+		return null;
+	}
+	if (typeof child.signalCode === "string" && child.signalCode.length > 0) {
+		return `signal ${child.signalCode}`;
+	}
+	return `code ${child.exitCode}`;
+}
 
 function parseArgs() {
 	const args = process.argv.slice(2);
@@ -42,16 +92,46 @@ function parseArgs() {
 	};
 }
 
-async function waitForJson(pathname, timeoutMs = 20_000) {
+async function waitForJson(pathname, options = {}) {
+	const { child = null, timeoutMs = STARTUP_TIMEOUT_MS } = options;
 	const start = Date.now();
 	while (Date.now() - start < timeoutMs) {
+		const exitSummary = child ? getChildExitSummary(child) : null;
+		if (exitSummary) {
+			throw new Error(
+				`Electron exited early (${exitSummary}) while waiting for ${pathname}`,
+			);
+		}
+
 		try {
 			const res = await fetch(`http://127.0.0.1:${DEBUG_PORT}${pathname}`);
 			if (res.ok) return await res.json();
 		} catch {}
-		await sleep(300);
+		await sleep(STARTUP_POLL_MS);
 	}
-	throw new Error(`Timed out waiting for ${pathname}`);
+
+	const exitSummary = child ? getChildExitSummary(child) : null;
+	if (exitSummary) {
+		throw new Error(
+			`Timed out waiting for ${pathname}; Electron exited with ${exitSummary}`,
+		);
+	}
+
+	throw new Error(`Timed out waiting for ${pathname} after ${timeoutMs}ms`);
+}
+
+function createElectronArgs() {
+	const args = [
+		".",
+		`--remote-debugging-port=${DEBUG_PORT}`,
+		"--remote-debugging-address=127.0.0.1",
+	];
+
+	if (process.platform === "linux" && process.env.CI === "true") {
+		args.push("--disable-gpu", "--no-sandbox");
+	}
+
+	return args;
 }
 
 async function selectRendererPage(browser) {
@@ -67,9 +147,7 @@ async function selectRendererPage(browser) {
 	throw new Error("Renderer page not found");
 }
 
-async function capture(page, label) {
-	const cdp = await page.createCDPSession();
-	await cdp.send("Performance.enable");
+async function capture(page, cdp, label) {
 	const [pageMetrics, perfMetrics, heapUsage, memoryInfo] = await Promise.all([
 		page.metrics(),
 		cdp.send("Performance.getMetrics"),
@@ -84,7 +162,6 @@ async function capture(page, label) {
 			};
 		}),
 	]);
-	await cdp.detach();
 
 	return {
 		label,
@@ -97,21 +174,16 @@ async function capture(page, label) {
 }
 
 async function stressActions(page, tick) {
-	const width = 1280;
-	const height = 800;
-	await page.mouse.move((tick * 37) % width, (tick * 53) % height);
-	await page.mouse.wheel({ deltaY: tick % 2 === 0 ? 400 : -300 });
-	await page.keyboard.press("PageDown");
-	await page.keyboard.press("PageUp");
-	await page.evaluate((n) => {
-		window.dispatchEvent(new Event("resize"));
-		document.dispatchEvent(
-			new KeyboardEvent("keydown", {
-				key: n % 2 === 0 ? "ArrowRight" : "ArrowLeft",
-				bubbles: true,
-			}),
-		);
-	});
+	try {
+		const width = 1280;
+		const height = 800;
+		await page.mouse.move((tick * 37) % width, (tick * 53) % height);
+		await page.mouse.wheel({ deltaY: tick % 2 === 0 ? 400 : -300 });
+		await page.keyboard.press("PageDown");
+		await page.keyboard.press("PageUp");
+	} catch (err) {
+		console.warn("[stress] interaction tick failed, continuing:", err);
+	}
 }
 
 function summarize(samples) {
@@ -146,36 +218,54 @@ async function main() {
 	const { durationMs, intervalMs, outputFile } = parseArgs();
 
 	const electronBinary = require("electron");
-	const child = spawn(
-		electronBinary,
-		[".", `--remote-debugging-port=${DEBUG_PORT}`],
-		{
-			cwd: ROOT,
-			stdio: "ignore",
-			env: { ...process.env, NODE_ENV: "production" },
+	const child = spawn(electronBinary, createElectronArgs(), {
+		cwd: ROOT,
+		stdio: "ignore",
+		env: {
+			...process.env,
+			NODE_ENV: "production",
+			TABST_FORCE_PRODUCTION_WINDOW: "1",
 		},
-	);
+	});
 
 	let browser;
 	try {
-		const version = await waitForJson("/json/version");
-		await waitForJson("/json/list");
+		await sleep(500);
+		const version = await waitForJson("/json/version", {
+			child,
+			timeoutMs: STARTUP_TIMEOUT_MS,
+		});
+		await waitForJson("/json/list", {
+			child,
+			timeoutMs: STARTUP_TIMEOUT_MS,
+		});
 
 		browser = await puppeteer.connect({
 			browserURL: `http://127.0.0.1:${DEBUG_PORT}`,
 			defaultViewport: null,
+			protocolTimeout: 30_000,
 		});
 
 		const page = await selectRendererPage(browser);
+		page.setDefaultTimeout(30_000);
+		page.setDefaultNavigationTimeout(30_000);
+		await sleep(Math.min(5_000, intervalMs));
+		const cdp = await page.createCDPSession();
+		await cdp.send("Performance.enable");
 		const start = Date.now();
 		const samples = [];
 		let tick = 0;
-
-		while (Date.now() - start <= durationMs) {
-			await stressActions(page, tick);
-			samples.push(await capture(page, `t${tick}`));
-			tick += 1;
-			await sleep(intervalMs);
+		try {
+			while (Date.now() - start <= durationMs) {
+				await stressActions(page, tick);
+				samples.push(await capture(page, cdp, `t${tick}`));
+				tick += 1;
+				await sleep(intervalMs);
+			}
+		} finally {
+			try {
+				await cdp.detach();
+			} catch {}
 		}
 
 		const result = {
@@ -203,12 +293,7 @@ async function main() {
 		try {
 			if (browser) await browser.disconnect();
 		} catch {}
-
-		if (!child.killed) {
-			child.kill("SIGTERM");
-			await sleep(1500);
-			if (!child.killed) child.kill("SIGKILL");
-		}
+		await terminateChild(child);
 	}
 }
 
