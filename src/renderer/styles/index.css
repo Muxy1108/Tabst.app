@@ -301,25 +301,6 @@
 	}
 }
 
-/*
- Mobile preview fit for alphaTab:
- - keep rendered score inside viewport width
- - avoid right-edge clipping on narrow screens
-*/
-.preview-mobile-fit .at-surface,
-.preview-mobile-fit .at-surface > div {
-	width: 100%;
-	max-width: 100%;
-}
-
-.preview-mobile-fit .at-surface svg,
-.preview-mobile-fit .at-surface-svg {
-	display: block;
-	width: 100%;
-	max-width: 100%;
-	height: auto;
-}
-
 /* AlphaTab 光标和选择样式 */
 .alpha-cursor,
 .at-cursor-bar {
@@ -348,6 +329,25 @@
 
 .at-selection div {
 	background: rgba(64, 64, 255, 0.1);
+}
+
+/*
+ Mobile preview fit for alphaTab:
+ - keep rendered score inside viewport width
+ - avoid right-edge clipping on narrow screens
+*/
+.preview-mobile-fit .at-surface,
+.preview-mobile-fit .at-surface > div {
+	width: 100%;
+	max-width: 100%;
+}
+
+.preview-mobile-fit .at-surface svg,
+.preview-mobile-fit .at-surface-svg {
+	display: block;
+	width: 100%;
+	max-width: 100%;
+	height: auto;
 }
 
 .at-highlight * {
