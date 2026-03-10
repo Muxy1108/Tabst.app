@@ -48,9 +48,10 @@ AlphaTex 编辑器实现文档。
 
 | 文档 | 内容 |
 |------|------|
-| [AUTO_UPDATE.md](./ops/AUTO_UPDATE.md) | 自动更新实现（electron-builder + electron-updater） |
+| [AUTO_UPDATE.md](./ops/AUTO_UPDATE.md) | 自动更新实现（需与当前 Tauri updater 流程对照审阅） |
 | [REFACTORING.md](./ops/REFACTORING.md) | Effect-TS 重构总结 |
 | [SECURITY.md](./ops/SECURITY.md) | 安全审计记录 |
+| [TAURI_MIGRATION_STATUS.md](./TAURI_MIGRATION_STATUS.md) | Tauri 迁移当前进度、已完成项、待办与协作说明 |
 
 ---
 
@@ -71,8 +72,11 @@ AlphaTex 编辑器实现文档。
 
 | 文档 | 内容 |
 |------|------|
-| `REPO_FEATURE_HANDOFF.md` | Repo 功能交接文档 |
-| `REPO_REFACTOR_CONTEXT.md` | Repo 重构上下文 |
+| `archived/electron/README.md` | Electron 时代归档说明 |
+| `archived/electron/Agents.zh.md` | Electron 时代中文指南归档 |
+| `archived/electron/REPO_FEATURE_HANDOFF.md` | Electron 时代 Repo 功能交接文档 |
+| `archived/electron/REPO_REFACTOR_CONTEXT.md` | Electron 时代 Repo 重构上下文 |
+| `archived/electron/PERFORMANCE_OPTIMIZATION_PLAN.md` | Electron 时代性能/打包优化草案 |
 
 ---
 

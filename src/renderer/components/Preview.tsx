@@ -37,6 +37,10 @@ import {
 	getDefaultExportFilename,
 } from "../lib/alphatab-export";
 import { mapSelectionToCodeRange } from "../lib/alphatex-selection-sync";
+import {
+	getCurrentAppZoomFactor,
+	subscribeAppZoomFactor,
+} from "../lib/app-zoom";
 import { loadBravuraFont, loadSoundFontFromUrl } from "../lib/assets";
 import { type AtDocConfig, parseAtDoc } from "../lib/atdoc";
 import { applyAtDocColoring } from "../lib/atdoc-coloring";
@@ -111,9 +115,11 @@ export default function Preview({
 	const scrollHostRef = useRef<HTMLDivElement | null>(null);
 	const apiRef = useRef<alphaTab.AlphaTabApi | null>(null);
 	const _cursorRef = useRef<HTMLDivElement | null>(null);
+	const currentSoundFontUrlRef = useRef<string | null>(null);
 	// Zoom state (percentage)
 
 	const zoomRef = useRef<number>(60);
+	const uiScaleRef = useRef<number>(getCurrentAppZoomFactor());
 	// Store tracks configuration for restoration during theme switching
 	const trackConfigRef = useRef<{
 		showNumbered?: boolean;
@@ -408,7 +414,7 @@ export default function Preview({
 			latestContentRef.current = nextContent;
 			useAppStore.getState().updateFileContent(activeFile.id, nextContent);
 			useAppStore.getState().clearScoreSelection();
-			void window.electronAPI.saveFile(activeFile.path, nextContent);
+			void window.desktopAPI.saveFile(activeFile.path, nextContent);
 		};
 
 		window.addEventListener("keydown", handleDeleteKey);
@@ -492,24 +498,36 @@ export default function Preview({
 		return () => ro.disconnect();
 	}, []);
 
+	const getEffectivePreviewScale = useCallback(
+		(zoomPercent: number): number => {
+			return (zoomPercent / 100) * uiScaleRef.current;
+		},
+		[],
+	);
+
 	// Apply zoom to alphaTab API
-	const applyZoom = useCallback((newPercent: number) => {
-		const pct = Math.max(10, Math.min(400, Math.round(newPercent)));
-		// Keep store in sync
-		useAppStore.getState().setZoomPercent(pct);
-		zoomRef.current = pct;
-		const api = apiRef.current;
-		if (!api || !api.settings) return;
-		try {
-			const disp = api.settings.display as unknown as { scale?: number };
-			disp.scale = pct / 100;
-			api.updateSettings?.();
-			// Prefer partial re-render if available
-			if (api.render) api.render();
-		} catch (e) {
-			console.error("[Preview] Failed to apply zoom:", e);
-		}
-	}, []);
+	const applyZoom = useCallback(
+		(newPercent: number, options?: { syncStore?: boolean }) => {
+			const pct = Math.max(10, Math.min(400, Math.round(newPercent)));
+			if (options?.syncStore !== false) {
+				// Keep store in sync
+				useAppStore.getState().setZoomPercent(pct);
+			}
+			zoomRef.current = pct;
+			const api = apiRef.current;
+			if (!api || !api.settings) return;
+			try {
+				const disp = api.settings.display as unknown as { scale?: number };
+				disp.scale = getEffectivePreviewScale(pct);
+				api.updateSettings?.();
+				// Prefer partial re-render if available
+				if (api.render) api.render();
+			} catch (e) {
+				console.error("[Preview] Failed to apply zoom:", e);
+			}
+		},
+		[getEffectivePreviewScale],
+	);
 
 	const applyScoreTracksMuted = useCallback(
 		(api: alphaTab.AlphaTabApi, muted: boolean): boolean => {
@@ -539,6 +557,13 @@ export default function Preview({
 	useEffect(() => {
 		metronomeOnlyModeRef.current = metronomeOnlyMode;
 	}, [metronomeOnlyMode]);
+
+	useEffect(() => {
+		return subscribeAppZoomFactor((nextScale) => {
+			uiScaleRef.current = nextScale;
+			applyZoom(zoomRef.current, { syncStore: false });
+		});
+	}, [applyZoom]);
 
 	// Bar highlight: use lib and keep lastColoredBars in ref for callbacks
 	const sanitizeAllBarStyles = useCallback(
@@ -683,7 +708,7 @@ export default function Preview({
 
 		if (atCfg.display && settings.display) {
 			if (typeof atCfg.display.scale === "number") {
-				settings.display.scale = atCfg.display.scale;
+				settings.display.scale = atCfg.display.scale * uiScaleRef.current;
 				changed = true;
 			}
 			if (typeof atCfg.display.layoutMode === "number") {
@@ -1076,7 +1101,9 @@ export default function Preview({
 			subscribe(
 				api.playerStateChanged,
 				(e: { state: number; stopped?: boolean }) => {
-					console.info("[Preview] alphaTab player state changed:", e);
+					console.info(
+						`[Preview] alphaTab player state changed ${JSON.stringify({ state: e?.state, stopped: e?.stopped ?? false })}`,
+					);
 					if (e?.stopped) {
 						// stopped 明确表示停止（而不是暂停），停止时清除播放相关高亮
 						useAppStore.getState().clearPlaybackHighlights();
@@ -1099,74 +1126,102 @@ export default function Preview({
 			try {
 				useAppStore.getState().registerPlayerControls({
 					play: () => {
-						// 🆕 播放开始时，清除用户手动选择的选区高亮（但保留编辑器光标触发的播放范围）
-						// 这样可以避免播放时编辑器中的蓝色选区高亮干扰视觉
-						useAppStore.getState().clearScoreSelection();
-
-						// 如果有高亮的小节，从该小节的第一个 beat 开始播放
-						const highlightedBar = lastColoredBarsRef.current;
-						if (
-							highlightedBar &&
-							highlightedBar.bars?.length > 0 &&
-							api.score
-						) {
-							const bar = highlightedBar.bars[0];
-							// 获取该小节的第一个 beat
-							if (bar.voices?.[0]?.beats?.length > 0) {
-								const firstBeat = bar.voices[0].beats[0];
-								const barIndex = bar.index;
-								const beatIndex = firstBeat.index;
-
-								console.info(
-									"[Preview] Starting playback from highlighted bar",
-									barIndex,
-									"beat",
-									beatIndex,
-								);
-
-								// 先停止当前播放（如果有）
-								api.stop?.();
-
-								// 先设置播放器光标位置
-								setPlayerCursorIfChanged({
-									barIndex,
-									beatIndex,
-								});
-
-								// 尝试设置播放位置
-								let positionSet = false;
-								try {
-									const startTick = getBeatStartTick(firstBeat);
-									if (typeof startTick === "number") {
-										api.tickPosition = startTick;
-										positionSet = true;
-									}
-								} catch (err) {
-									console.warn(
-										"[Preview] Failed to set playback position:",
-										err,
+						void (async () => {
+							const waitForPlaybackReady = async () => {
+								const startedAt = Date.now();
+								while (Date.now() - startedAt < 2500) {
+									if (api.isReadyForPlayback) return true;
+									await new Promise((resolve) =>
+										window.setTimeout(resolve, 50),
 									);
 								}
+								return api.isReadyForPlayback;
+							};
 
-								// 如果成功设置了位置，等待一小段时间让位置设置生效，然后播放
-								if (positionSet) {
-									// 使用 setTimeout 确保位置设置生效后再播放
-									setTimeout(() => {
-										api.play?.();
-									}, 50); // 50ms 延迟，确保位置设置生效
-								} else {
-									// 如果无法设置位置，尝试使用 highlightPlaybackRange
-									// 然后正常播放（可能不会从该位置开始，但至少会高亮）
-									if (typeof api.highlightPlaybackRange === "function") {
+							const ensurePlaybackReady = async () => {
+								if (api.isReadyForPlayback) return true;
+								const soundFontUrl = currentSoundFontUrlRef.current;
+								if (soundFontUrl) {
+									await loadSoundFontFromUrl(api, soundFontUrl);
+								}
+								return waitForPlaybackReady();
+							};
+
+							const playNow = async (delayMs = 0) => {
+								const ready = await ensurePlaybackReady();
+								if (!ready) {
+									console.error(
+										"[Preview] Playback requested before player was ready",
+										{
+											isReadyForPlayback: api.isReadyForPlayback,
+											tickPosition: api.tickPosition,
+										},
+									);
+									return;
+								}
+								if (delayMs > 0) {
+									await new Promise((resolve) =>
+										window.setTimeout(resolve, delayMs),
+									);
+								}
+								const didPlay = api.play?.();
+								console.info(
+									`[Preview] api.play() invoked ${JSON.stringify({ didPlay, isReadyForPlayback: api.isReadyForPlayback, tickPosition: api.tickPosition })}`,
+								);
+							};
+
+							useAppStore.getState().clearScoreSelection();
+
+							const highlightedBar = lastColoredBarsRef.current;
+							if (
+								highlightedBar &&
+								highlightedBar.bars?.length > 0 &&
+								api.score
+							) {
+								const bar = highlightedBar.bars[0];
+								if (bar.voices?.[0]?.beats?.length > 0) {
+									const firstBeat = bar.voices[0].beats[0];
+									const barIndex = bar.index;
+									const beatIndex = firstBeat.index;
+
+									console.info(
+										"[Preview] Starting playback from highlighted bar",
+										barIndex,
+										"beat",
+										beatIndex,
+									);
+
+									api.stop?.();
+									setPlayerCursorIfChanged({ barIndex, beatIndex });
+
+									let positionSet = false;
+									try {
+										const startTick = getBeatStartTick(firstBeat);
+										if (typeof startTick === "number") {
+											api.tickPosition = startTick;
+											positionSet = true;
+										}
+									} catch (err) {
+										console.warn(
+											"[Preview] Failed to set playback position:",
+											err,
+										);
+									}
+
+									if (
+										!positionSet &&
+										typeof api.highlightPlaybackRange === "function"
+									) {
 										api.highlightPlaybackRange(firstBeat, firstBeat);
 									}
-									api.play?.();
+
+									await playNow(positionSet ? 50 : 0);
+									return;
 								}
-								return;
 							}
-						}
-						// 如果没有高亮小节，正常从头播放
-						api.play?.();
+
+							await playNow();
+						})();
 					},
 					pause: () => api.pause?.(),
 					stop: () => {
@@ -1553,6 +1608,7 @@ export default function Preview({
 
 				// 1. 获取所有资源 URL（自动适配 dev 和打包环境）
 				const urls = await getResourceUrls();
+				currentSoundFontUrlRef.current = urls.soundFontUrl;
 				const el = containerRef.current as HTMLElement;
 				// 实际滚动容器：优先使用 scrollHostRef（overflow-auto），
 				// 退回到原来的父元素以保持兼容性。
@@ -1574,7 +1630,7 @@ export default function Preview({
 
 					// 使用工具函数创建预览配置
 					const settings = createPreviewSettings(urls as ResourceUrls, {
-						scale: zoomRef.current / 100,
+						scale: getEffectivePreviewScale(zoomRef.current),
 						scrollElement: scrollEl,
 						enablePlayer: !editorHasFocusRef.current,
 						colors,
@@ -1642,7 +1698,7 @@ export default function Preview({
 									const newSettings = createPreviewSettings(
 										urls as ResourceUrls,
 										{
-											scale: zoomRef.current / 100,
+											scale: getEffectivePreviewScale(zoomRef.current),
 											scrollElement:
 												(scrollHostRef.current as HTMLElement | null) ??
 												scrollEl,
@@ -1799,6 +1855,7 @@ export default function Preview({
 		setParseError,
 		setFirstStaffOptions,
 		getBeatStartTick,
+		getEffectivePreviewScale,
 		increment,
 		dumpCounters,
 		transitionLifecycle,

@@ -40,7 +40,7 @@ This is just the beginning. My vision is to transform scattered PDFs and images 
 - pnpm
 - TypeScript
 - Vite
-- [Electron](https://www.electronjs.org/docs/latest/)
+- [Tauri 2](https://tauri.app/)
 - [React 19](https://react.dev/)
 - [shadcn/ui](https://ui.shadcn.com/)
 - [Tailwindcss 3](https://tailwindcss.com/docs/installation) (Ultimately decided to revert to v3 as v4 is not stable enough)
@@ -64,5 +64,31 @@ pnpm install
 ## Development
 
 ```powershell
-pnpm run dev  # Run React development server + Electron development process
+pnpm run dev  # Run React development server + Tauri shell
+pnpm run dev:react # Run renderer only
 ```
+
+## Build Targets
+
+```powershell
+pnpm run build        # Default desktop build (Tauri)
+pnpm run build:web    # Website target (static dist)
+pnpm run build:tauri  # Explicit Tauri desktop build
+```
+
+## Release
+
+```powershell
+pnpm run release
+pnpm run release:mac
+pnpm run release:linux
+pnpm run release:win
+```
+
+## Desktop Runtime
+
+The desktop runtime cutover is complete and the repository is now Tauri-first.
+
+- Product builds, release commands, and CI desktop validation all target Tauri.
+- The renderer uses a unified `desktopAPI` bridge for desktop capabilities.
+- Detailed normalization work and follow-up tasks are tracked in [docs/dev/TAURI_MIGRATION_STATUS.md](./docs/dev/TAURI_MIGRATION_STATUS.md).

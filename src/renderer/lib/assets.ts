@@ -11,9 +11,24 @@ function isLikelySoundFont(bytes: Uint8Array): boolean {
 	return riff === "RIFF" && sfbk === "sfbk";
 }
 
-function isElectronRuntime(): boolean {
-	if (typeof navigator === "undefined") return false;
-	return /\bElectron\//.test(navigator.userAgent);
+function isDesktopShellRuntime(): boolean {
+	if (typeof window === "undefined") return false;
+
+	const maybeWindow = window as Window & {
+		__TAURI_INTERNALS__?: unknown;
+		__TAURI__?: unknown;
+		__TAURI_IPC__?: unknown;
+	};
+	const userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent;
+
+	return (
+		Boolean(maybeWindow.__TAURI_INTERNALS__) ||
+		Boolean(maybeWindow.__TAURI__) ||
+		Boolean(maybeWindow.__TAURI_IPC__) ||
+		window.location.protocol === "tauri:" ||
+		window.location.hostname === "tauri.localhost" ||
+		/\bTauri\b/i.test(userAgent)
+	);
 }
 
 function hasUserActivatedAudio(): boolean {
@@ -35,11 +50,11 @@ let loadedBravuraFontUrl: string | null = null;
  * 适用于已经通过 ResourceLoaderService 生成的字体 URL
  */
 export async function loadBravuraFont(fontUrl: string): Promise<boolean> {
-	const fontName = "Bravura";
+	const fontNames = ["Bravura", "alphaTab"];
 	if (
 		typeof document !== "undefined" &&
 		typeof document.fonts?.check === "function" &&
-		document.fonts.check(`1em "${fontName}"`)
+		fontNames.every((fontName) => document.fonts.check(`1em "${fontName}"`))
 	) {
 		return true;
 	}
@@ -51,10 +66,16 @@ export async function loadBravuraFont(fontUrl: string): Promise<boolean> {
 	loadedBravuraFontUrl = fontUrl;
 	bravuraFontLoadPromise = (async () => {
 		try {
-			const fontFace = new FontFace(fontName, `url(${fontUrl})`);
-			await fontFace.load();
-			document.fonts.add(fontFace);
-			console.info(`[AssetLoader] Loaded Bravura font from: ${fontUrl}`);
+			const fontFaces = fontNames.map(
+				(fontName) => new FontFace(fontName, `url(${fontUrl})`),
+			);
+			await Promise.all(fontFaces.map((fontFace) => fontFace.load()));
+			for (const fontFace of fontFaces) {
+				document.fonts.add(fontFace);
+			}
+			console.info(
+				`[AssetLoader] Loaded Bravura/alphaTab fonts from: ${fontUrl}`,
+			);
 			return true;
 		} catch (err) {
 			console.warn("[AssetLoader] Failed to load Bravura font:", err);
@@ -88,7 +109,7 @@ export async function loadSoundFontFromUrl(
 	}
 
 	try {
-		if (!isElectronRuntime() && !hasUserActivatedAudio()) {
+		if (!isDesktopShellRuntime() && !hasUserActivatedAudio()) {
 			console.info(
 				"[AssetLoader] Skip soundfont preload before user activation in web runtime",
 			);

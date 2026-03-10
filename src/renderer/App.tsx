@@ -18,6 +18,7 @@ import UpdateToast from "./components/UpdateToast";
 import { useFileOperations } from "./hooks/useFileOperations";
 import { getAlphaTexHighlight } from "./lib/alphatex-highlight";
 import { createAlphaTexLSPClient } from "./lib/alphatex-lsp";
+import { restoreAppZoomFactor } from "./lib/app-zoom";
 import { bindGlobalShortcutListener } from "./lib/shortcut-manager";
 import { isTemplateCandidateName } from "./lib/template-utils";
 import { runUiCommand } from "./lib/ui-command-registry";
@@ -110,7 +111,7 @@ function App() {
 	const resolveFileContent = async (file: FileItem): Promise<string | null> => {
 		if (file.contentLoaded) return file.content;
 		try {
-			const result = await window.electronAPI.readFile(file.path);
+			const result = await window.desktopAPI.readFile(file.path);
 			if (result.error) {
 				console.error("Failed to read template file:", result.error);
 				return null;
@@ -149,7 +150,7 @@ function App() {
 
 		updateFileContent(activeFile.id, nextContent);
 		try {
-			await window.electronAPI.saveFile(activeFile.path, nextContent);
+			await window.desktopAPI.saveFile(activeFile.path, nextContent);
 		} catch (error) {
 			console.error("Failed to save file after template insertion:", error);
 		}
@@ -198,7 +199,7 @@ function App() {
 
 		updateFileContent(createdFile.id, templateContent);
 		try {
-			await window.electronAPI.saveFile(createdFile.path, templateContent);
+			await window.desktopAPI.saveFile(createdFile.path, templateContent);
 		} catch (error) {
 			console.error("Failed to save file created from template:", error);
 		}
@@ -211,7 +212,7 @@ function App() {
 
 	useEffect(() => {
 		let mounted = true;
-		void window.electronAPI
+		void window.desktopAPI
 			.getAppVersion()
 			.then((version) => {
 				if (!mounted) return;
@@ -228,6 +229,49 @@ function App() {
 			mounted = false;
 			window.removeEventListener("resize", handleResize);
 		};
+	}, []);
+
+	useEffect(() => {
+		if (isWebRuntime) return;
+
+		const storageKey = "tabst:auto-update:last-check-at";
+		const minIntervalMs = 1000 * 60 * 60 * 6;
+		const now = Date.now();
+
+		try {
+			const raw = window.localStorage.getItem(storageKey);
+			const last = raw ? Number.parseInt(raw, 10) : 0;
+			if (Number.isFinite(last) && last > 0 && now - last < minIntervalMs) {
+				return;
+			}
+		} catch {
+			// ignore localStorage failures
+		}
+
+		const timer = window.setTimeout(() => {
+			void window.desktopAPI
+				.checkForUpdates()
+				.catch((error) => {
+					console.error("Auto update check failed:", error);
+				})
+				.finally(() => {
+					try {
+						window.localStorage.setItem(storageKey, String(Date.now()));
+					} catch {
+						// ignore localStorage failures
+					}
+				});
+		}, 4000);
+
+		return () => {
+			window.clearTimeout(timer);
+		};
+	}, [isWebRuntime]);
+
+	useEffect(() => {
+		void restoreAppZoomFactor().catch((error) => {
+			console.error("Failed to restore app zoom:", error);
+		});
 	}, []);
 
 	useEffect(() => {
@@ -460,9 +504,9 @@ function App() {
 			}, 180);
 		};
 
-		void window.electronAPI.startRepoWatch(activeRepo.path);
+		void window.desktopAPI.startRepoWatch(activeRepo.path);
 
-		const unsubscribe = window.electronAPI.onRepoFsChanged((event) => {
+		const unsubscribe = window.desktopAPI.onRepoFsChanged((event) => {
 			if (event.repoPath !== activeRepo.path) return;
 			scheduleRefresh(event.eventType, event.changedPath);
 		});
@@ -474,7 +518,7 @@ function App() {
 			}
 			fsRecentEventRef.current.clear();
 			unsubscribe();
-			void window.electronAPI.stopRepoWatch();
+			void window.desktopAPI.stopRepoWatch();
 		};
 	}, [activeRepoId, repos, refreshFileTree]);
 

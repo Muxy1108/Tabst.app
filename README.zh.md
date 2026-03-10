@@ -29,7 +29,7 @@ MusiXTeX, Lilypond 在乐谱标记语言上做出了出版级的表率，而 alp
 - pnpm
 - TypeScript
 - Vite
-- [Electron](https://www.electronjs.org/zh/docs/latest/)
+- [Tauri 2](https://tauri.app/)
 - [React 19](https://zh-hans.react.dev/)
 - [shadcn/ui](https://ui.shadcn.com/)
 - [Tailwindcss 3](https://www.tailwindcss.cn/docs/installation) (最终还是决定换回3，v4不够稳定)
@@ -56,24 +56,34 @@ pnpm install
 ## 开发
 
 ```powershell
-pnpm run dev  # 运行 React 开发服务器 + Electron 开发进程
+pnpm run dev  # 运行 React 开发服务器 + Tauri 壳层
+pnpm run dev:react # 仅运行渲染器开发服务器
 ```
 
 ## 构建
 
 ```powershell
-pnpm run build  # 构建渲染器 + 主进程 (Vite + esbuild)
+pnpm run build  # 默认桌面构建（Tauri）
+pnpm run build:web  # 构建 website 静态站点
+pnpm run build:tauri  # 显式执行 Tauri 桌面构建
 ```
 
-## 打包 (Electron Forge)
-
-此项目使用 Electron Forge 来打包和构建可分发的安装程序。
-
-基本命令：
+## 发布
 
 ```powershell
-pnpm run make  # Electron Forge: 打包 + 创建安装程序
+pnpm run release
+pnpm run release:mac
+pnpm run release:linux
+pnpm run release:win
 ```
+
+## 桌面运行时
+
+当前仓库已经完成桌面运行时切换，并以 Tauri 作为唯一桌面壳层。
+
+- 产品构建、发布命令与 CI 桌面校验均以 Tauri 为准。
+- 渲染层统一通过 `desktopAPI` bridge 接入桌面能力。
+- 后续的规范化收尾工作见 [docs/dev/TAURI_MIGRATION_STATUS.md](./docs/dev/TAURI_MIGRATION_STATUS.md)。
 
 ## CI
 
